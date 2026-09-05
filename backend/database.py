@@ -21,6 +21,97 @@ def verify_password(password: str, stored_hash: str) -> bool:
     salt, hashed = stored_hash.split("$", 1)
     return hashlib.sha256((salt + password).encode('utf-8')).hexdigest() == hashed
 
+class LibsqlRow(dict):
+    """Row wrapper for libSQL supporting both dict keys (row['id']) and index access (row[0])."""
+    def __init__(self, description, values):
+        keys = [col[0] for col in description] if description else []
+        super().__init__(zip(keys, values))
+        self._tuple = values
+
+    def __getitem__(self, item):
+        if isinstance(item, int):
+            return self._tuple[item]
+        return super().__getitem__(item)
+
+
+class LibsqlCursorWrapper:
+    """Cursor wrapper for libSQL ensuring transparent execution and dict-like row mapping."""
+    def __init__(self, conn, cursor):
+        self._conn = conn
+        self._cursor = cursor
+
+    def execute(self, *args, **kwargs):
+        self._cursor.execute(*args, **kwargs)
+        return self
+
+    def executemany(self, *args, **kwargs):
+        self._cursor.executemany(*args, **kwargs)
+        return self
+
+    def fetchone(self):
+        row = self._cursor.fetchone()
+        if row is None:
+            return None
+        desc = getattr(self._cursor, "description", None)
+        if desc:
+            return LibsqlRow(desc, row)
+        return row
+
+    def fetchall(self):
+        rows = self._cursor.fetchall()
+        desc = getattr(self._cursor, "description", None)
+        if not desc or not rows:
+            return rows
+        return [LibsqlRow(desc, r) for r in rows]
+
+    @property
+    def lastrowid(self):
+        val = getattr(self._cursor, "lastrowid", None)
+        if val is not None and val > 0:
+            return val
+        try:
+            cur = self._conn.cursor()
+            cur.execute("SELECT last_insert_rowid()")
+            res = cur.fetchone()
+            if res and res[0]:
+                return res[0]
+        except Exception:
+            pass
+        return val
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+
+class LibsqlConnectionWrapper:
+    """Connection wrapper for libSQL."""
+    def __init__(self, raw_conn):
+        self._conn = raw_conn
+
+    def cursor(self):
+        return LibsqlCursorWrapper(self._conn, self._conn.cursor())
+
+    def execute(self, *args, **kwargs):
+        cur = self.cursor()
+        cur.execute(*args, **kwargs)
+        return cur
+
+    def commit(self):
+        if hasattr(self._conn, "commit"):
+            return self._conn.commit()
+
+    def rollback(self):
+        if hasattr(self._conn, "rollback"):
+            return self._conn.rollback()
+
+    def close(self):
+        if hasattr(self._conn, "close"):
+            return self._conn.close()
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
 def get_db_connection():
     # Cloud SQLite (Turso) connection if environment variable configured
     if TURSO_DATABASE_URL:
@@ -28,13 +119,12 @@ def get_db_connection():
             import libsql_experimental as libsql
             if TURSO_AUTH_TOKEN:
                 try:
-                    conn = libsql.connect(TURSO_DATABASE_URL, auth_token=TURSO_AUTH_TOKEN)
+                    raw_conn = libsql.connect(TURSO_DATABASE_URL, auth_token=TURSO_AUTH_TOKEN)
                 except TypeError:
-                    conn = libsql.connect(f"{TURSO_DATABASE_URL}?authToken={TURSO_AUTH_TOKEN}")
+                    raw_conn = libsql.connect(f"{TURSO_DATABASE_URL}?authToken={TURSO_AUTH_TOKEN}")
             else:
-                conn = libsql.connect(TURSO_DATABASE_URL)
-            conn.row_factory = sqlite3.Row
-            return conn
+                raw_conn = libsql.connect(TURSO_DATABASE_URL)
+            return LibsqlConnectionWrapper(raw_conn)
         except Exception as e:
             print(f"Warning: Turso connection failed ({e}), falling back to local SQLite.")
     
