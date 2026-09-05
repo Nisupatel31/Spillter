@@ -1,0 +1,33 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Local databases (prevents uploading test/local data)
+*.db
+splitter.db
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+
+# Editor and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Debug test images and sample reports
+amount_crop*.png
+payment_of_crop.png
+phone_receipt.png
+rupee_glyph.png
+sample_trip_expenses.xlsx
+sample_trip_statement.pdf
+run.bat

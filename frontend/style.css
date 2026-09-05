@@ -1,0 +1,83 @@
+/* Spillter Custom Styles */
+
+/* Active and inactive tabs */
+.tab-btn {
+  transition: all 0.15s ease-in-out;
+}
+
+.tab-btn.active-tab {
+  background-color: #eef2ff;
+  color: #4338ca;
+  font-weight: 600;
+}
+
+.tab-btn.inactive-tab {
+  color: #64748b;
+}
+
+.tab-btn.inactive-tab:hover {
+  background-color: #f8fafc;
+  color: #1e293b;
+}
+
+/* Split tabs */
+.split-tab-btn {
+  transition: all 0.15s ease-in-out;
+}
+
+/* Remove up and down stepper arrows from all number inputs */
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none !important;
+  margin: 0 !important;
+  display: none !important;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield !important;
+  appearance: textfield !important;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Print styles for statement */
+@media print {
+  header, section, .no-print, nav, button, a[href^="http"], footer {
+    display: none !important;
+  }
+
+  body {
+    background-color: white !important;
+    color: black !important;
+  }
+
+  #tab-reports {
+    display: block !important;
+  }
+
+  .tab-content {
+    display: none !important;
+  }
+
+  #tab-reports .shadow-xs, #tab-reports .border {
+    border: none !important;
+    box-shadow: none !important;
+  }
+}
