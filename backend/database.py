@@ -277,19 +277,6 @@ def init_db():
         cursor.execute("ALTER TABLE trips ADD COLUMN user_id INTEGER REFERENCES users(id)")
 
     conn.commit()
-
-    # Seed demo user if no user exists
-    cursor.execute("SELECT COUNT(*) FROM users")
-    if cursor.fetchone()[0] == 0:
-        seed_demo_user(cursor)
-        conn.commit()
-
-    # Check if any trip exists, if not seed demo trip
-    cursor.execute("SELECT COUNT(*) FROM trips")
-    if cursor.fetchone()[0] == 0:
-        seed_demo_data(cursor)
-        conn.commit()
-
     conn.close()
 
 def seed_demo_user(cursor: sqlite3.Cursor) -> int:

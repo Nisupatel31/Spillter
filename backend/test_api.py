@@ -316,6 +316,25 @@ def test_receipt_parsing():
     assert data4["payment_mode"] == "UPI"
     assert data4["date"] == "2026-08-31"
 
+def test_trip_update_and_delete():
+    # Create trip
+    r1 = client.post("/api/trips", json={"name": "Temp Trip", "description": "For update/delete", "currency": "₹"})
+    assert r1.status_code == 200
+    trip_id = r1.json()["id"]
+
+    # Update trip
+    r2 = client.put(f"/api/trips/{trip_id}", json={"name": "Renamed Trip", "description": "Updated desc", "currency": "$"})
+    assert r2.status_code == 200
+    assert r2.json()["name"] == "Renamed Trip"
+    assert r2.json()["currency"] == "$"
+
+    # Delete trip
+    r3 = client.delete(f"/api/trips/{trip_id}")
+    assert r3.status_code == 200
+
+    # Verify trip is deleted
+    r4 = client.get(f"/api/trips/{trip_id}")
+    assert r4.status_code == 404
 
 if __name__ == "__main__":
     init_db()
@@ -324,6 +343,7 @@ if __name__ == "__main__":
     test_get_dashboard()
     test_get_settlement_and_whatsapp()
     test_add_trip_and_custom_splits()
+    test_trip_update_and_delete()
     test_auth_flow()
     test_payment_mode_in_expenses()
     test_receipt_parsing()

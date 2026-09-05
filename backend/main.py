@@ -54,6 +54,11 @@ class TripCreate(BaseModel):
     currency: Optional[str] = "₹"
     user_id: Optional[int] = None
 
+class TripUpdate(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    currency: Optional[str] = "₹"
+
 class MemberCreate(BaseModel):
     name: str
     phone: Optional[str] = ""
@@ -258,7 +263,7 @@ def list_trips(authorization: Optional[str] = Header(None), x_session_token: Opt
             FROM trips t
             LEFT JOIN members m ON t.id = m.trip_id
             LEFT JOIN expenses e ON t.id = e.trip_id
-            WHERE t.user_id = ? OR t.user_id IS NULL OR t.user_id = 1
+            WHERE t.user_id = ?
             GROUP BY t.id
             ORDER BY t.id DESC
         """, (user_id,))
@@ -316,10 +321,48 @@ def get_trip(trip_id: int):
         raise HTTPException(status_code=404, detail="Trip not found")
     return dict(row)
 
+@app.put("/api/trips/{trip_id}")
+def update_trip(trip_id: int, payload: TripUpdate):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Trip name cannot be empty")
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM trips WHERE id = ?", (trip_id,))
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="Trip not found")
+
+    cursor.execute(
+        "UPDATE trips SET name = ?, description = ?, currency = ? WHERE id = ?",
+        (name, payload.description.strip() if payload.description else "", payload.currency.strip() if payload.currency else "₹", trip_id)
+    )
+    conn.commit()
+    cursor.execute("SELECT * FROM trips WHERE id = ?", (trip_id,))
+    updated = cursor.fetchone()
+    conn.close()
+    return dict(updated)
+
 @app.delete("/api/trips/{trip_id}")
 def delete_trip(trip_id: int):
     conn = get_db_connection()
     cursor = conn.cursor()
+    cursor.execute("SELECT id FROM trips WHERE id = ?", (trip_id,))
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="Trip not found")
+
+    # Explicit cascading cleanup for robust cloud db compatibility
+    cursor.execute("DELETE FROM fuel_logs WHERE trip_id = ?", (trip_id,))
+    cursor.execute("DELETE FROM trip_vehicles WHERE trip_id = ?", (trip_id,))
+    cursor.execute("DELETE FROM settlement_payments WHERE trip_id = ?", (trip_id,))
+    cursor.execute("""
+        DELETE FROM expense_splits 
+        WHERE expense_id IN (SELECT id FROM expenses WHERE trip_id = ?)
+    """, (trip_id,))
+    cursor.execute("DELETE FROM expenses WHERE trip_id = ?", (trip_id,))
+    cursor.execute("DELETE FROM members WHERE trip_id = ?", (trip_id,))
     cursor.execute("DELETE FROM trips WHERE id = ?", (trip_id,))
     conn.commit()
     conn.close()

@@ -7,6 +7,40 @@ let members = [];
 let expenses = [];
 let currentSplitType = 'equal';
 let currentUser = null;
+let currentDashboardData = null;
+
+// --- THEME MANAGEMENT (DARK / LIGHT MODE) ---
+function initTheme() {
+  const saved = localStorage.getItem('spillter_theme');
+  const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const isDark = saved === 'dark' || (!saved && prefersDark);
+  if (isDark) {
+    document.documentElement.classList.add('dark');
+  } else {
+    document.documentElement.classList.remove('dark');
+  }
+  updateThemeUI(isDark);
+}
+
+function toggleTheme() {
+  const isDark = document.documentElement.classList.toggle('dark');
+  localStorage.setItem('spillter_theme', isDark ? 'dark' : 'light');
+  updateThemeUI(isDark);
+  if (currentDashboardData) {
+    renderCharts(currentDashboardData);
+  }
+}
+
+function updateThemeUI(isDark) {
+  const icon = document.getElementById('themeIcon');
+  if (icon) {
+    icon.setAttribute('data-lucide', isDark ? 'sun' : 'moon');
+    if (window.lucide) lucide.createIcons();
+  }
+}
+
+// Initial theme bootstrap
+initTheme();
 
 // Fuel & Mileage state
 let vehicleCatalogs = null;
@@ -91,17 +125,20 @@ async function checkAuth() {
 
 function updateUserUI(user) {
   const profileHeader = document.getElementById('userProfileHeader');
+  const navLoginBtn = document.getElementById('navLoginBtn');
   const nameEl = document.getElementById('userNameHeader');
   const emailEl = document.getElementById('userEmailHeader');
   const avatarEl = document.getElementById('userAvatarPill');
 
   if (user && user.name) {
     if (profileHeader) profileHeader.classList.remove('hidden');
+    if (navLoginBtn) navLoginBtn.classList.add('hidden');
     if (nameEl) nameEl.innerText = user.name;
     if (emailEl) emailEl.innerText = user.email;
     if (avatarEl) avatarEl.innerText = user.name.charAt(0).toUpperCase();
   } else {
     if (profileHeader) profileHeader.classList.add('hidden');
+    if (navLoginBtn) navLoginBtn.classList.remove('hidden');
   }
 }
 
@@ -329,12 +366,27 @@ async function loadTrips() {
     const res = await authFetch('/api/trips');
     trips = await res.json();
     const select = document.getElementById('tripSelect');
+    const zeroEmptyState = document.getElementById('zeroTripsEmptyState');
+    const activeView = document.getElementById('activeTripView');
+    const tripHeaderBanner = document.getElementById('tripHeaderBanner');
+    const tripSelectWrap = document.getElementById('tripSelectWrap');
+
     select.innerHTML = '';
 
-    if (trips.length === 0) {
-      showToast('No trips found. Create a new trip to get started!');
+    if (!trips || trips.length === 0) {
+      currentTripId = null;
+      currentTrip = null;
+      if (zeroEmptyState) zeroEmptyState.classList.remove('hidden');
+      if (activeView) activeView.classList.add('hidden');
+      if (tripHeaderBanner) tripHeaderBanner.classList.add('hidden');
+      if (tripSelectWrap) tripSelectWrap.classList.add('hidden');
       return;
     }
+
+    if (zeroEmptyState) zeroEmptyState.classList.add('hidden');
+    if (activeView) activeView.classList.remove('hidden');
+    if (tripHeaderBanner) tripHeaderBanner.classList.remove('hidden');
+    if (tripSelectWrap) tripSelectWrap.classList.remove('hidden');
 
     trips.forEach(t => {
       const opt = document.createElement('option');
@@ -444,7 +496,14 @@ async function loadDashboard(tripId) {
 }
 
 function renderCharts(data) {
+  currentDashboardData = data;
   const curr = data.kpis.currency || '₹';
+  const isDark = document.documentElement.classList.contains('dark');
+  const textColor = isDark ? '#94a3b8' : '#64748b';
+  const gridColor = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)';
+  const doughnutBorder = isDark ? '#111827' : '#FFFFFF';
+  const fairShareBg = isDark ? '#334155' : '#E2E8F0';
+  const fairShareHover = isDark ? '#475569' : '#CBD5E1';
 
   // 1. Category Donut Chart
   const catCanvas = document.getElementById('categoryChart');
@@ -461,7 +520,7 @@ function renderCharts(data) {
         data: catValues,
         backgroundColor: catColors,
         borderWidth: 2,
-        borderColor: '#FFFFFF'
+        borderColor: doughnutBorder
       }]
     },
     options: {
@@ -480,14 +539,14 @@ function renderCharts(data) {
   data.category_breakdown.forEach(c => {
     const meta = CATEGORY_META[c.category] || { color: '#6366f1' };
     const row = document.createElement('div');
-    row.className = 'flex items-center justify-between py-1 border-b border-slate-100 last:border-0';
+    row.className = 'flex items-center justify-between py-1 border-b border-slate-100 dark:border-slate-800 last:border-0';
     row.innerHTML = `
       <div class="flex items-center space-x-2">
         <span class="w-2.5 h-2.5 rounded-full" style="background-color: ${meta.color}"></span>
-        <span class="font-medium text-slate-700">${c.category}</span>
+        <span class="font-medium text-slate-700 dark:text-slate-300">${c.category}</span>
         <span class="text-slate-400">(${c.percentage}%)</span>
       </div>
-      <span class="font-bold text-slate-900">${curr}${c.total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+      <span class="font-bold text-slate-900 dark:text-white">${curr}${c.total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
     `;
     legendBox.appendChild(row);
   });
@@ -513,8 +572,8 @@ function renderCharts(data) {
         {
           label: 'Fair Calculated Share',
           data: memShare,
-          backgroundColor: '#E2E8F0',
-          hoverBackgroundColor: '#CBD5E1',
+          backgroundColor: fairShareBg,
+          hoverBackgroundColor: fairShareHover,
           borderRadius: 6
         }
       ]
@@ -523,15 +582,23 @@ function renderCharts(data) {
       responsive: true,
       maintainAspectRatio: false,
       scales: {
-        x: { grid: { display: false } },
+        x: {
+          grid: { display: false },
+          ticks: { color: textColor }
+        },
         y: {
+          grid: { color: gridColor },
           ticks: {
+            color: textColor,
             callback: val => `${curr}${val}`
           }
         }
       },
       plugins: {
-        legend: { position: 'top' }
+        legend: {
+          position: 'top',
+          labels: { color: textColor }
+        }
       }
     }
   });
@@ -561,11 +628,22 @@ function renderCharts(data) {
       responsive: true,
       maintainAspectRatio: false,
       scales: {
+        x: {
+          grid: { color: gridColor },
+          ticks: { color: textColor }
+        },
         y: {
           beginAtZero: true,
+          grid: { color: gridColor },
           ticks: {
+            color: textColor,
             callback: val => `${curr}${val}`
           }
+        }
+      },
+      plugins: {
+        legend: {
+          labels: { color: textColor }
         }
       }
     }
@@ -1424,6 +1502,73 @@ async function submitNewTrip(event) {
   } catch (err) {
     console.error(err);
     showToast('Error creating trip', true);
+  }
+}
+
+function openEditTripModal() {
+  if (!currentTrip) return;
+  document.getElementById('editTripName').value = currentTrip.name || '';
+  document.getElementById('editTripDesc').value = currentTrip.description || '';
+  document.getElementById('editTripCurrency').value = currentTrip.currency || '₹';
+  openModal('editTripModal');
+}
+
+async function submitEditTrip(event) {
+  event.preventDefault();
+  if (!currentTripId) return;
+  const name = document.getElementById('editTripName').value.trim();
+  const description = document.getElementById('editTripDesc').value.trim();
+  const currency = document.getElementById('editTripCurrency').value;
+
+  if (!name) {
+    showToast('Trip name cannot be empty', true);
+    return;
+  }
+
+  try {
+    const res = await authFetch(`/api/trips/${currentTripId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, description, currency })
+    });
+
+    if (res.ok) {
+      showToast(`Trip "${name}" updated successfully! ✨`);
+      closeModal('editTripModal');
+      await loadTrips();
+    } else {
+      const err = await res.json();
+      showToast(err.detail || 'Failed to update trip', true);
+    }
+  } catch (err) {
+    console.error(err);
+    showToast('Error updating trip', true);
+  }
+}
+
+async function confirmDeleteTrip() {
+  if (!currentTrip || !currentTripId) return;
+  const tripName = currentTrip.name;
+  const confirmed = confirm(`Are you sure you want to delete the trip "${tripName}"?\n\nThis will permanently delete all expenses, members, settlements, and fuel logs associated with this trip.`);
+  if (!confirmed) return;
+
+  try {
+    const res = await authFetch(`/api/trips/${currentTripId}`, {
+      method: 'DELETE'
+    });
+
+    if (res.ok) {
+      showToast(`Trip "${tripName}" deleted successfully`);
+      currentTripId = null;
+      currentTrip = null;
+      await loadTrips();
+    } else {
+      const err = await res.json();
+      showToast(err.detail || 'Failed to delete trip', true);
+    }
+  } catch (err) {
+    console.error(err);
+    showToast('Error deleting trip', true);
   }
 }
 
