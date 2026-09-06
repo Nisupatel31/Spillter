@@ -6,6 +6,7 @@ let trips = [];
 let members = [];
 let expenses = [];
 let currentSplitType = 'equal';
+let editingExpenseId = null;
 let currentUser = null;
 let currentDashboardData = null;
 
@@ -308,6 +309,16 @@ function switchTab(tabId) {
   if (activeBtn) {
     activeBtn.classList.add('active-tab');
     activeBtn.classList.remove('inactive-tab');
+  }
+
+  // Ensure trip banner is strictly scoped to Dashboard only
+  const tripHeaderBanner = document.getElementById('tripHeaderBanner');
+  if (tripHeaderBanner) {
+    if (tabId === 'dashboard' && trips && trips.length > 0) {
+      tripHeaderBanner.classList.remove('hidden');
+    } else {
+      tripHeaderBanner.classList.add('hidden');
+    }
   }
 
   // Refresh charts if opening dashboard
@@ -749,11 +760,16 @@ function filterExpenses() {
 
       <div class="flex items-center justify-between sm:justify-end sm:space-x-4 border-t sm:border-t-0 pt-3 sm:pt-0 border-slate-100">
         <div class="text-right">
-          <span class="text-lg sm:text-xl font-black text-slate-900">${curr}${e.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+          <span class="text-lg sm:text-xl font-black text-slate-900 dark:text-white">${curr}${e.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
         </div>
-        <button onclick="deleteExpenseItem(${e.id})" class="text-slate-400 hover:text-rose-600 p-2 rounded-lg hover:bg-rose-50 transition" title="Delete Expense">
-          <i data-lucide="trash-2" class="w-4 h-4"></i>
-        </button>
+        <div class="flex items-center space-x-1">
+          <button onclick="editExpenseItem(${e.id})" class="text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 p-2 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-950/40 transition" title="Edit Expense">
+            <i data-lucide="pencil" class="w-4 h-4"></i>
+          </button>
+          <button onclick="deleteExpenseItem(${e.id})" class="text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 p-2 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition" title="Delete Expense">
+            <i data-lucide="trash-2" class="w-4 h-4"></i>
+          </button>
+        </div>
       </div>
     `;
     container.appendChild(card);
@@ -1027,20 +1043,51 @@ function renderStatementTable() {
 
   expenses.forEach(e => {
     total += e.amount;
-    const splitsSummary = e.splits.map(s => `${s.member_name} (${curr}${s.share_amount.toFixed(2)})`).join(', ');
+
+    // Clean Date formatting: DD MMM YYYY (e.g. 26 Aug 2026)
+    let displayDate = e.date;
+    try {
+      const parts = e.date.split('-');
+      if (parts.length === 3) {
+        const d = new Date(parts[0], parts[1] - 1, parts[2]);
+        displayDate = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      }
+    } catch (err) {}
+
+    // Intelligent Split Status Badge
+    let splitBadge = '';
+    if (e.split_type === 'equal') {
+      if (members.length > 0 && e.splits.length >= members.length) {
+        splitBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50 whitespace-nowrap">All ${members.length} Equal</span>`;
+      } else {
+        splitBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/50 whitespace-nowrap">${e.splits.length} Members</span>`;
+      }
+    } else if (e.split_type === 'selected') {
+      splitBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/50 whitespace-nowrap">${e.splits.length} Selected</span>`;
+    } else {
+      splitBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-purple-50 dark:bg-purple-950/50 text-purple-700 dark:text-purple-300 border border-purple-200/60 dark:border-purple-800/50 whitespace-nowrap">Custom</span>`;
+    }
+
+    // Rich Split Breakdown Chips
+    const splitChips = e.splits.map(s => `
+      <span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-[11px] font-medium text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700/60 mr-1 mb-1 whitespace-nowrap shadow-2xs">
+        <span>${s.member_name}:</span>
+        <b class="text-indigo-600 dark:text-indigo-400 font-bold">${curr}${s.share_amount.toFixed(2)}</b>
+      </span>
+    `).join('');
 
     const tr = document.createElement('tr');
-    tr.className = 'hover:bg-slate-50 transition';
+    tr.className = 'hover:bg-slate-50 dark:hover:bg-slate-800/50 transition border-b border-slate-100 dark:border-slate-800/60';
     tr.innerHTML = `
-      <td class="px-4 py-3 font-mono text-xs text-slate-400">#${e.id}</td>
-      <td class="px-4 py-3 font-mono text-xs text-slate-600">${e.date}</td>
-      <td class="px-4 py-3 font-semibold text-slate-900">${e.title}</td>
-      <td class="px-4 py-3"><span class="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-xs">${e.category}</span></td>
-      <td class="px-4 py-3 font-medium text-slate-800">${e.payer_name}</td>
-      <td class="px-4 py-3"><span class="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-xs">${e.payment_mode || 'Cash'}</span></td>
-      <td class="px-4 py-3 capitalize text-slate-500 text-xs">${e.split_type}</td>
-      <td class="px-4 py-3 text-xs text-slate-500 max-w-xs truncate" title="${splitsSummary}">${splitsSummary}</td>
-      <td class="px-4 py-3 text-right font-bold text-slate-900">${curr}${e.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+      <td class="px-4 py-3 font-mono text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">#${e.id}</td>
+      <td class="px-4 py-3 font-semibold text-xs text-slate-700 dark:text-slate-200 whitespace-nowrap">${displayDate}</td>
+      <td class="px-4 py-3 font-bold text-slate-900 dark:text-white">${e.title}</td>
+      <td class="px-4 py-3 whitespace-nowrap"><span class="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-medium">${e.category}</span></td>
+      <td class="px-4 py-3 font-semibold text-slate-800 dark:text-slate-200 whitespace-nowrap">${e.payer_name}</td>
+      <td class="px-4 py-3 whitespace-nowrap"><span class="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 text-xs font-semibold">💳 ${e.payment_mode || 'UPI'}</span></td>
+      <td class="px-4 py-3 whitespace-nowrap">${splitBadge}</td>
+      <td class="px-4 py-3 min-w-[200px]"><div class="flex flex-wrap items-center pt-0.5">${splitChips}</div></td>
+      <td class="px-4 py-3 text-right font-black text-slate-900 dark:text-white whitespace-nowrap">${curr}${e.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
     `;
     tbody.appendChild(tr);
   });
@@ -1084,15 +1131,23 @@ function renderMembersTab() {
         </button>
       </div>
 
-      <div class="bg-slate-50 rounded-xl p-3 grid grid-cols-2 gap-2 text-center text-xs">
+      <div class="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-3 grid grid-cols-2 gap-2 text-center text-xs">
         <div>
           <span class="text-slate-400 block">Total Spent</span>
-          <span class="font-bold text-slate-800" id="mem-spent-${m.id}">...</span>
+          <span class="font-bold text-slate-800 dark:text-slate-200" id="mem-spent-${m.id}">...</span>
         </div>
         <div>
           <span class="text-slate-400 block">Fair Share</span>
-          <span class="font-bold text-slate-800" id="mem-share-${m.id}">...</span>
+          <span class="font-bold text-slate-800 dark:text-slate-200" id="mem-share-${m.id}">...</span>
         </div>
+      </div>
+
+      <div class="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+        <span class="text-[11px] text-slate-400 font-medium">Individual Audit</span>
+        <a href="/api/trips/${currentTripId}/members/${m.id}/export/pdf" target="_blank" class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-xs font-bold border border-indigo-200/70 dark:border-indigo-800/60 shadow-2xs transition" title="Download individual traveler statement PDF">
+          <i data-lucide="file-text" class="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400"></i>
+          <span>Statement PDF</span>
+        </a>
       </div>
     `;
     grid.appendChild(card);
@@ -1139,10 +1194,83 @@ function openAddExpenseModal() {
     return;
   }
 
+  editingExpenseId = null;
+  const titleEl = document.getElementById('addExpenseModalTitle');
+  if (titleEl) titleEl.innerText = 'Add Travel Expense';
+  const subEl = document.getElementById('addExpenseModalSubtitle');
+  if (subEl) subEl.innerText = 'Log a bill and select how to split it';
+  const submitBtn = document.getElementById('expSubmitBtn');
+  if (submitBtn) submitBtn.innerText = 'Save Expense';
+  const ocrBanner = document.getElementById('expOcrBanner');
+  if (ocrBanner) ocrBanner.classList.remove('hidden');
+
   document.getElementById('addExpenseForm').reset();
   document.getElementById('expDate').value = new Date().toISOString().split('T')[0];
   populatePayerDropdown();
   setSplitType('equal');
+  openModal('addExpenseModal');
+}
+
+function editExpenseItem(expenseId) {
+  const exp = expenses.find(e => e.id === expenseId);
+  if (!exp) {
+    showToast('Expense not found', true);
+    return;
+  }
+
+  editingExpenseId = expenseId;
+
+  // Update modal titles & buttons
+  const titleEl = document.getElementById('addExpenseModalTitle');
+  if (titleEl) titleEl.innerText = 'Edit Travel Expense';
+  const subEl = document.getElementById('addExpenseModalSubtitle');
+  if (subEl) subEl.innerText = 'Update bill details and adjust member splits';
+  const submitBtn = document.getElementById('expSubmitBtn');
+  if (submitBtn) submitBtn.innerText = 'Update Expense';
+  const ocrBanner = document.getElementById('expOcrBanner');
+  if (ocrBanner) ocrBanner.classList.add('hidden');
+
+  // Fill form inputs
+  document.getElementById('expTitle').value = exp.title || '';
+  document.getElementById('expAmount').value = exp.amount ? exp.amount.toString() : '';
+  document.getElementById('expDate').value = exp.date || new Date().toISOString().split('T')[0];
+  document.getElementById('expCategory').value = exp.category || 'Misc';
+  populatePayerDropdown();
+  document.getElementById('expPayer').value = exp.payer_id;
+  if (document.getElementById('expPaymentMode')) {
+    document.getElementById('expPaymentMode').value = exp.payment_mode || 'UPI';
+  }
+  document.getElementById('expNotes').value = exp.notes || '';
+
+  // Setup splits
+  const splitMemberIds = new Set(exp.splits.map(s => s.member_id));
+  const isCustom = exp.split_type === 'custom';
+
+  if (isCustom) {
+    setSplitType('custom');
+    setTimeout(() => {
+      document.querySelectorAll('.split-member-checkbox').forEach(cb => {
+        const mid = parseInt(cb.value);
+        cb.checked = splitMemberIds.has(mid);
+        const inp = document.querySelector(`.custom-fixed-input[data-mid="${mid}"]`);
+        if (inp) {
+          const sObj = exp.splits.find(s => s.member_id === mid);
+          inp.value = sObj ? sObj.share_amount.toFixed(2) : '';
+        }
+      });
+      recalculateSplits();
+    }, 20);
+  } else {
+    setSplitType('equal');
+    setTimeout(() => {
+      document.querySelectorAll('.split-member-checkbox').forEach(cb => {
+        const mid = parseInt(cb.value);
+        cb.checked = splitMemberIds.has(mid);
+      });
+      recalculateSplits();
+    }, 20);
+  }
+
   openModal('addExpenseModal');
 }
 
@@ -1450,15 +1578,20 @@ async function submitExpense(event) {
     notes
   };
 
+  const isEditing = Boolean(editingExpenseId);
+  const url = isEditing ? `/api/expenses/${editingExpenseId}` : `/api/trips/${currentTripId}/expenses`;
+  const method = isEditing ? 'PUT' : 'POST';
+
   try {
-    const res = await authFetch(`/api/trips/${currentTripId}/expenses`, {
-      method: 'POST',
+    const res = await authFetch(url, {
+      method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
 
     if (res.ok) {
-      showToast('Expense logged successfully! 💰');
+      showToast(isEditing ? 'Expense updated successfully! ✏️' : 'Expense logged successfully! 💰');
+      editingExpenseId = null;
       closeModal('addExpenseModal');
       await loadTripData(currentTripId);
     } else {

@@ -166,46 +166,6 @@
     </div>
   </header>
 
-  <!-- Trip Header Banner -->
-  <section id="tripHeaderBanner" class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 dark:from-slate-950 dark:via-indigo-950/80 dark:to-slate-950 text-white py-5 sm:py-6 shadow-inner border-b border-indigo-900/30">
-    <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
-      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <div class="flex items-center flex-wrap gap-2 sm:gap-3">
-            <h1 id="tripTitle" class="text-xl sm:text-2xl lg:text-3xl font-extrabold tracking-tight">Loading Trip...</h1>
-            <span id="tripCurrencyBadge" class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">₹ INR</span>
-            
-            <!-- Quick Trip Management: Edit (Rename) & Delete -->
-            <button onclick="openEditTripModal()" class="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-medium text-slate-200 border border-white/15 backdrop-blur-sm transition" title="Rename or edit trip details">
-              <i data-lucide="pencil" class="w-3.5 h-3.5 text-indigo-300"></i>
-              <span>Rename</span>
-            </button>
-            <button onclick="confirmDeleteTrip()" class="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-xs font-medium text-rose-300 border border-rose-500/30 backdrop-blur-sm transition" title="Delete this trip">
-              <i data-lucide="trash-2" class="w-3.5 h-3.5 text-rose-400"></i>
-              <span>Delete</span>
-            </button>
-          </div>
-          <p id="tripDescription" class="text-xs sm:text-sm text-slate-300 mt-1 max-w-2xl">Trip description and details...</p>
-        </div>
-        <div class="flex items-center flex-wrap gap-2">
-          <!-- Quick Export Buttons in Banner -->
-          <a id="bannerPdfBtn" href="#" target="_blank" class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold text-white border border-white/10 backdrop-blur-sm transition">
-            <i data-lucide="file-text" class="w-3.5 h-3.5 text-red-400"></i>
-            <span>PDF Statement</span>
-          </a>
-          <a id="bannerExcelBtn" href="#" target="_blank" class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold text-white border border-white/10 backdrop-blur-sm transition">
-            <i data-lucide="sheet" class="w-3.5 h-3.5 text-emerald-400"></i>
-            <span>Excel Export</span>
-          </a>
-          <button onclick="switchTab('settlement')" class="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-xs font-bold text-white shadow-md shadow-emerald-600/30 transition">
-            <i data-lucide="message-circle" class="w-3.5 h-3.5"></i>
-            <span>WhatsApp Share</span>
-          </button>
-        </div>
-      </div>
-    </div>
-  </section>
-
   <!-- Main Content Area -->
   <main class="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-6">
 
@@ -229,6 +189,44 @@
 
       <!-- TAB 1: DASHBOARD -->
       <div id="tab-dashboard" class="tab-content space-y-6">
+
+        <!-- Trip Header Banner (Scoped to Dashboard Only) -->
+        <section id="tripHeaderBanner" class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 dark:from-slate-950 dark:via-indigo-950/80 dark:to-slate-950 text-white p-5 sm:p-6 rounded-3xl shadow-lg border border-indigo-900/30">
+          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <div class="flex items-center flex-wrap gap-2 sm:gap-3">
+                <h1 id="tripTitle" class="text-xl sm:text-2xl lg:text-3xl font-extrabold tracking-tight">Loading Trip...</h1>
+                <span id="tripCurrencyBadge" class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">₹ INR</span>
+                
+                <!-- Quick Trip Management: Edit (Rename) & Delete -->
+                <button onclick="openEditTripModal()" class="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-medium text-slate-200 border border-white/15 backdrop-blur-sm transition" title="Rename or edit trip details">
+                  <i data-lucide="pencil" class="w-3.5 h-3.5 text-indigo-300"></i>
+                  <span>Rename</span>
+                </button>
+                <button onclick="confirmDeleteTrip()" class="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-xs font-medium text-rose-300 border border-rose-500/30 backdrop-blur-sm transition" title="Delete this trip">
+                  <i data-lucide="trash-2" class="w-3.5 h-3.5 text-rose-400"></i>
+                  <span>Delete</span>
+                </button>
+              </div>
+              <p id="tripDescription" class="text-xs sm:text-sm text-slate-300 mt-1 max-w-2xl">Trip description and details...</p>
+            </div>
+            <div class="flex items-center flex-wrap gap-2">
+              <!-- Quick Export Buttons in Banner -->
+              <a id="bannerPdfBtn" href="#" target="_blank" class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold text-white border border-white/10 backdrop-blur-sm transition">
+                <i data-lucide="file-text" class="w-3.5 h-3.5 text-red-400"></i>
+                <span>PDF Statement</span>
+              </a>
+              <a id="bannerExcelBtn" href="#" target="_blank" class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold text-white border border-white/10 backdrop-blur-sm transition">
+                <i data-lucide="sheet" class="w-3.5 h-3.5 text-emerald-400"></i>
+                <span>Excel Export</span>
+              </a>
+              <button onclick="switchTab('settlement')" class="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-xs font-bold text-white shadow-md shadow-emerald-600/30 transition">
+                <i data-lucide="message-circle" class="w-3.5 h-3.5"></i>
+                <span>WhatsApp Share</span>
+              </button>
+            </div>
+          </div>
+        </section>
       <!-- KPI Stats Grid -->
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         <!-- Total Spent -->
@@ -556,15 +554,15 @@
           <table class="min-w-full divide-y divide-slate-200 text-left text-xs sm:text-sm">
             <thead class="bg-slate-50 text-slate-500 uppercase tracking-wider font-bold">
               <tr>
-                <th class="px-4 py-3">ID</th>
-                <th class="px-4 py-3">Date</th>
-                <th class="px-4 py-3">Expense Title</th>
-                <th class="px-4 py-3">Category</th>
-                <th class="px-4 py-3">Paid By</th>
-                <th class="px-4 py-3">Mode</th>
-                <th class="px-4 py-3">Split Method</th>
-                <th class="px-4 py-3">Split Breakdown</th>
-                <th class="px-4 py-3 text-right">Total Amount</th>
+                <th class="px-4 py-3 whitespace-nowrap">ID</th>
+                <th class="px-4 py-3 whitespace-nowrap">Date</th>
+                <th class="px-4 py-3 whitespace-nowrap">Expense Title</th>
+                <th class="px-4 py-3 whitespace-nowrap">Category</th>
+                <th class="px-4 py-3 whitespace-nowrap">Paid By</th>
+                <th class="px-4 py-3 whitespace-nowrap">Mode</th>
+                <th class="px-4 py-3 whitespace-nowrap">Split Method</th>
+                <th class="px-4 py-3 min-w-[200px]">Split Breakdown</th>
+                <th class="px-4 py-3 text-right whitespace-nowrap">Total Amount</th>
               </tr>
             </thead>
             <tbody id="statementTableBody" class="divide-y divide-slate-100 text-slate-700">
@@ -793,8 +791,8 @@
             <i data-lucide="receipt-plus" class="w-5 h-5"></i>
           </div>
           <div>
-            <h3 class="text-lg font-bold text-slate-900">Add Travel Expense</h3>
-            <p class="text-xs text-slate-500">Log a bill and select how to split it</p>
+            <h3 id="addExpenseModalTitle" class="text-lg font-bold text-slate-900">Add Travel Expense</h3>
+            <p id="addExpenseModalSubtitle" class="text-xs text-slate-500">Log a bill and select how to split it</p>
           </div>
         </div>
         <button onclick="closeModal('addExpenseModal')" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
@@ -803,7 +801,7 @@
       </div>
 
       <!-- Quick OCR Scan Option -->
-      <div class="mt-4 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200/80 rounded-2xl p-3 flex items-center justify-between">
+      <div id="expOcrBanner" class="mt-4 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200/80 rounded-2xl p-3 flex items-center justify-between">
         <div class="flex items-center space-x-2.5">
           <div class="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
             <i data-lucide="camera" class="w-4 h-4"></i>
@@ -911,7 +909,7 @@
           <button type="button" onclick="closeModal('addExpenseModal')" class="px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold text-slate-600 hover:bg-slate-50">
             Cancel
           </button>
-          <button type="submit" class="px-6 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold shadow-md shadow-brand-600/30 transition">
+          <button type="submit" id="expSubmitBtn" class="px-6 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold shadow-md shadow-brand-600/30 transition">
             Save Expense
           </button>
         </div>

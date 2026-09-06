@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 import secrets
 from backend.database import get_db_connection, init_db, hash_password, verify_password
 from backend.settlement import calculate_trip_settlement
-from backend.reports import generate_trip_pdf, generate_trip_excel
+from backend.reports import generate_trip_pdf, generate_trip_excel, generate_member_pdf
 from backend.receipt_parser import parse_receipt_text
 from backend.mileage import (
     get_vehicle_catalogs,
@@ -463,10 +463,48 @@ def create_expense(trip_id: int, payload: ExpenseCreate):
     conn.close()
     return {"id": expense_id, "message": "Expense added successfully"}
 
+@app.put("/api/expenses/{expense_id}")
+def update_expense(expense_id: int, payload: ExpenseCreate):
+    if payload.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+    if not payload.splits:
+        raise HTTPException(status_code=400, detail="At least one split member is required")
+
+    total_split = sum(s.share_amount for s in payload.splits)
+    if abs(total_split - payload.amount) > 0.10:
+        raise HTTPException(status_code=400, detail=f"Sum of shares ({total_split:.2f}) does not match expense amount ({payload.amount:.2f})")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT id, trip_id FROM expenses WHERE id = ?", (expense_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Expense not found")
+
+    cursor.execute("""
+        UPDATE expenses
+        SET title = ?, amount = ?, date = ?, category = ?, payer_id = ?, split_type = ?, payment_mode = ?, notes = ?
+        WHERE id = ?
+    """, (payload.title.strip(), payload.amount, payload.date, payload.category, payload.payer_id, payload.split_type, payload.payment_mode or "UPI", payload.notes, expense_id))
+
+    cursor.execute("DELETE FROM expense_splits WHERE expense_id = ?", (expense_id,))
+    for s in payload.splits:
+        cursor.execute("""
+            INSERT INTO expense_splits (expense_id, member_id, share_amount, percentage)
+            VALUES (?, ?, ?, ?)
+        """, (expense_id, s.member_id, s.share_amount, s.percentage))
+
+    conn.commit()
+    conn.close()
+    return {"id": expense_id, "message": "Expense updated successfully"}
+
 @app.delete("/api/expenses/{expense_id}")
 def delete_expense(expense_id: int):
     conn = get_db_connection()
     cursor = conn.cursor()
+    cursor.execute("DELETE FROM expense_splits WHERE expense_id = ?", (expense_id,))
     cursor.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
     conn.commit()
     conn.close()
@@ -670,6 +708,15 @@ def export_trip_excel(trip_id: int):
         headers={"Content-Disposition": f"attachment; filename=trip_{trip_id}_expenses.xlsx"}
     )
 
+@app.get("/api/trips/{trip_id}/members/{member_id}/export/pdf")
+def export_member_pdf(trip_id: int, member_id: int):
+    pdf_buffer = generate_member_pdf(trip_id, member_id)
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=trip_{trip_id}_member_{member_id}_statement.pdf"}
+    )
+
 
 # ----------------- RECEIPT SCANNING & PARSING -----------------
 @app.post("/api/receipts/parse-text")
@@ -824,6 +871,51 @@ def api_create_fuel_log(trip_id: int, payload: FuelLogCreate):
     conn.close()
 
     return {"id": log_id, "expense_id": expense_id, "message": "Fuel log recorded successfully"}
+
+
+@app.put("/api/trips/{trip_id}/fuel-logs/{log_id}")
+def api_update_fuel_log(trip_id: int, log_id: int, payload: FuelLogCreate):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    log = cursor.execute("SELECT * FROM fuel_logs WHERE id = ? AND trip_id = ?", (log_id, trip_id)).fetchone()
+    if not log:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Fuel log not found")
+
+    v_row = cursor.execute("SELECT id, fuel_type FROM trip_vehicles WHERE trip_id = ?", (trip_id,)).fetchone()
+    v_fuel = v_row["fuel_type"] if v_row else (payload.fuel_type or "Petrol")
+
+    if log["expense_id"] and payload.add_to_expenses and payload.payer_id:
+        unit = "kg" if v_fuel == "CNG" else "L"
+        exp_title = f"Fuel ({v_fuel}) - {payload.fuel_quantity} {unit}"
+        cursor.execute("""
+            UPDATE expenses
+            SET title = ?, amount = ?, date = ?, payer_id = ?, split_type = ?, notes = ?
+            WHERE id = ?
+        """, (exp_title, payload.fuel_amount, payload.date, payload.payer_id, payload.split_type or "equal", payload.notes or "Auto-synced from Fuel Fill-Up", log["expense_id"]))
+
+        if payload.splits and len(payload.splits) > 0:
+            cursor.execute("DELETE FROM expense_splits WHERE expense_id = ?", (log["expense_id"],))
+            for s in payload.splits:
+                cursor.execute("""
+                    INSERT INTO expense_splits (expense_id, member_id, share_amount, percentage)
+                    VALUES (?, ?, ?, ?)
+                """, (log["expense_id"], s.member_id, s.share_amount, s.percentage))
+
+    cursor.execute("""
+        UPDATE fuel_logs
+        SET date = ?, odometer_reading = ?, distance_run = ?, fuel_amount = ?,
+            fuel_quantity = ?, fuel_price_per_unit = ?, is_full_tank = ?, payer_id = ?, notes = ?
+        WHERE id = ? AND trip_id = ?
+    """, (
+        payload.date, payload.odometer_reading, payload.distance_run or 0.0,
+        payload.fuel_amount, payload.fuel_quantity, payload.fuel_price_per_unit,
+        1 if payload.is_full_tank else 0, payload.payer_id, payload.notes or "",
+        log_id, trip_id
+    ))
+    conn.commit()
+    conn.close()
+    return {"id": log_id, "message": "Fuel log updated successfully"}
 
 
 @app.delete("/api/trips/{trip_id}/fuel-logs/{log_id}")

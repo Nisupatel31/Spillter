@@ -336,6 +336,90 @@ def test_trip_update_and_delete():
     r4 = client.get(f"/api/trips/{trip_id}")
     assert r4.status_code == 404
 
+def test_expense_update():
+    trip_res = client.post("/api/trips", json={"name": "Goa Trip Update Test", "currency": "₹"})
+    assert trip_res.status_code == 200
+    trip_id = trip_res.json()["id"]
+
+    m1 = client.post(f"/api/trips/{trip_id}/members", json={"name": "Alice"}).json()["id"]
+    m2 = client.post(f"/api/trips/{trip_id}/members", json={"name": "Bob"}).json()["id"]
+
+    create_res = client.post(f"/api/trips/{trip_id}/expenses", json={
+        "title": "Dinner",
+        "amount": 1000.0,
+        "date": "2026-09-01",
+        "category": "Food",
+        "payer_id": m1,
+        "split_type": "equal",
+        "payment_mode": "UPI",
+        "splits": [
+            {"member_id": m1, "share_amount": 500.0},
+            {"member_id": m2, "share_amount": 500.0}
+        ],
+        "notes": "Initial dinner"
+    })
+    assert create_res.status_code == 200
+    expense_id = create_res.json()["id"]
+
+    update_res = client.put(f"/api/expenses/{expense_id}", json={
+        "title": "Seafood Banquet",
+        "amount": 1500.0,
+        "date": "2026-09-02",
+        "category": "Food",
+        "payer_id": m1,
+        "split_type": "custom",
+        "payment_mode": "Credit Card",
+        "splits": [
+            {"member_id": m1, "share_amount": 1000.0, "percentage": None},
+            {"member_id": m2, "share_amount": 500.0, "percentage": None}
+        ],
+        "notes": "Updated with drinks and desserts"
+    })
+    assert update_res.status_code == 200
+
+    expenses = client.get(f"/api/trips/{trip_id}/expenses").json()
+    assert len(expenses) == 1
+    exp = expenses[0]
+    assert exp["title"] == "Seafood Banquet"
+    assert exp["amount"] == 1500.0
+    assert exp["date"] == "2026-09-02"
+    assert exp["payment_mode"] == "Credit Card"
+    assert exp["split_type"] == "custom"
+    assert len(exp["splits"]) == 2
+    alice_split = next(s for s in exp["splits"] if s["member_id"] == m1)
+    assert alice_split["share_amount"] == 1000.0
+
+def test_member_pdf_export():
+    trip_res = client.post("/api/trips", json={"name": "Member PDF Test Trip", "currency": "₹"})
+    assert trip_res.status_code == 200
+    trip_id = trip_res.json()["id"]
+
+    m1 = client.post(f"/api/trips/{trip_id}/members", json={"name": "Rohan", "phone": "9876543210"}).json()["id"]
+    m2 = client.post(f"/api/trips/{trip_id}/members", json={"name": "Kavya", "phone": "9876543211"}).json()["id"]
+
+    client.post(f"/api/trips/{trip_id}/expenses", json={
+        "title": "Hotel Check-in",
+        "amount": 4000.0,
+        "date": "2026-09-03",
+        "category": "Stay",
+        "payer_id": m1,
+        "split_type": "equal",
+        "splits": [
+            {"member_id": m1, "share_amount": 2000.0},
+            {"member_id": m2, "share_amount": 2000.0}
+        ]
+    })
+
+    pdf_res1 = client.get(f"/api/trips/{trip_id}/members/{m1}/export/pdf")
+    assert pdf_res1.status_code == 200
+    assert pdf_res1.headers["content-type"] == "application/pdf"
+    assert len(pdf_res1.content) > 1000
+
+    pdf_res2 = client.get(f"/api/trips/{trip_id}/members/{m2}/export/pdf")
+    assert pdf_res2.status_code == 200
+    assert pdf_res2.headers["content-type"] == "application/pdf"
+    assert len(pdf_res2.content) > 1000
+
 if __name__ == "__main__":
     init_db()
     test_root()
@@ -344,6 +428,8 @@ if __name__ == "__main__":
     test_get_settlement_and_whatsapp()
     test_add_trip_and_custom_splits()
     test_trip_update_and_delete()
+    test_expense_update()
+    test_member_pdf_export()
     test_auth_flow()
     test_payment_mode_in_expenses()
     test_receipt_parsing()

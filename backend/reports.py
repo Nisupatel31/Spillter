@@ -152,6 +152,17 @@ def generate_trip_pdf(trip_id: int) -> io.BytesIO:
         textColor=colors.white
     )
 
+    amount_cell_style = ParagraphStyle(
+        'AmountCell',
+        parent=cell_bold_style,
+        alignment=2
+    )
+    header_right_style = ParagraphStyle(
+        'HeaderRight',
+        parent=header_cell_style,
+        alignment=2
+    )
+
     story = []
 
     # Title & Header
@@ -184,7 +195,10 @@ def generate_trip_pdf(trip_id: int) -> io.BytesIO:
     ]
     t_kpi = Table(kpi_data, colWidths=[130, 130, 130, 130])
     t_kpi.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#F1F5F9")),
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor("#EEF2FF")),
+        ('BACKGROUND', (1, 0), (1, -1), colors.HexColor("#F8FAFC")),
+        ('BACKGROUND', (2, 0), (2, -1), colors.HexColor("#ECFDF5")),
+        ('BACKGROUND', (3, 0), (3, -1), colors.HexColor("#FEF3C7")),
         ('BOX', (0, 0), (-1, -1), 1, colors.HexColor("#CBD5E1")),
         ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
         ('TOPPADDING', (0, 0), (-1, -1), 6),
@@ -206,7 +220,7 @@ def generate_trip_pdf(trip_id: int) -> io.BytesIO:
                 Paragraph("<b>From (Payer)</b>", header_cell_style),
                 Paragraph("<b>Action</b>", header_cell_style),
                 Paragraph("<b>To (Receiver)</b>", header_cell_style),
-                Paragraph("<b>Amount to Pay</b>", header_cell_style)
+                Paragraph("<b>Amount to Pay</b>", header_right_style)
             ]
         ]
         for s in data["settlements"]:
@@ -214,7 +228,7 @@ def generate_trip_pdf(trip_id: int) -> io.BytesIO:
                 Paragraph(f"<b>{s['from_name']}</b>", cell_style),
                 Paragraph("pays ➔", cell_style),
                 Paragraph(f"<b>{s['to_name']}</b>", cell_style),
-                Paragraph(f"<b>{curr_symbol}{s['amount']:,.2f}</b>", cell_bold_style)
+                Paragraph(f"<b>{curr_symbol}{s['amount']:,.2f}</b>", amount_cell_style)
             ])
         t_settle = Table(settle_table_data, colWidths=[150, 80, 150, 140])
         t_settle.setStyle(TableStyle([
@@ -237,15 +251,20 @@ def generate_trip_pdf(trip_id: int) -> io.BytesIO:
                 Paragraph("<b>Date</b>", header_cell_style),
                 Paragraph("<b>Payer</b>", header_cell_style),
                 Paragraph("<b>Receiver</b>", header_cell_style),
-                Paragraph("<b>Amount Paid</b>", header_cell_style)
+                Paragraph("<b>Amount Paid</b>", header_right_style)
             ]
         ]
         for sh in data["settlement_history"]:
+            raw_sh_date = sh.get("date", "")
+            try:
+                disp_sh_date = datetime.strptime(raw_sh_date, "%Y-%m-%d").strftime("%d %b %Y")
+            except Exception:
+                disp_sh_date = raw_sh_date
             comp_data.append([
-                Paragraph(sh["date"], cell_style),
+                Paragraph(disp_sh_date, cell_style),
                 Paragraph(sh["payer_name"], cell_style),
                 Paragraph(sh["receiver_name"], cell_style),
-                Paragraph(f"<b>{curr_symbol}{float(sh['amount']):,.2f}</b>", cell_bold_style)
+                Paragraph(f"<b>{curr_symbol}{float(sh['amount']):,.2f}</b>", amount_cell_style)
             ])
         t_comp = Table(comp_data, colWidths=[90, 150, 150, 130])
         t_comp.setStyle(TableStyle([
@@ -313,33 +332,440 @@ def generate_trip_pdf(trip_id: int) -> io.BytesIO:
             Paragraph("<b>Category</b>", header_cell_style),
             Paragraph("<b>Paid By</b>", header_cell_style),
             Paragraph("<b>Mode</b>", header_cell_style),
-            Paragraph("<b>Split Type</b>", header_cell_style),
-            Paragraph("<b>Amount</b>", header_cell_style),
+            Paragraph("<b>Split Status</b>", header_cell_style),
+            Paragraph("<b>Amount</b>", header_right_style),
         ]
     ]
 
+    total_member_count = data.get("member_count", 1)
     for e in data["expenses"]:
         clean_title = e["title"].encode('ascii', 'ignore').decode().strip() or e["title"]
+        clean_notes = (e.get("notes") or "").encode('ascii', 'ignore').decode().strip()
+        title_html = f"<b>{clean_title}</b>"
+        if clean_notes:
+            title_html += f"<br/><font color='#64748B' size='7'><i>{clean_notes}</i></font>"
+
         mode = e.get("payment_mode") or "UPI"
+        raw_date = e.get("date", "")
+        try:
+            display_date = datetime.strptime(raw_date, "%Y-%m-%d").strftime("%d %b %Y")
+        except Exception:
+            display_date = raw_date
+
+        splits = e.get("splits", [])
+        split_count = len(splits)
+        split_type = (e.get("split_type") or "equal").lower()
+
+        if split_count >= total_member_count and split_type == "equal":
+            split_html = "<b>Equal</b><br/><font color='#059669' size='7'>All members</font>"
+        elif split_count < total_member_count:
+            names = ", ".join(s.get("member_name", "") for s in splits)
+            split_html = f"<b>{split_count} Members</b><br/><font color='#4F46E5' size='7'>{names}</font>"
+        else:
+            shares = ", ".join(f"{s.get('member_name', '')[:5]}:{curr_symbol}{s.get('share_amount', 0):,.0f}" for s in splits)
+            split_html = f"<b>Custom</b><br/><font color='#D97706' size='7'>{shares}</font>"
+
         exp_table_data.append([
-            Paragraph(e["date"], cell_style),
-            Paragraph(f"<b>{clean_title}</b>", cell_style),
+            Paragraph(f"<b>{display_date}</b>", cell_style),
+            Paragraph(title_html, cell_style),
             Paragraph(e["category"], cell_style),
-            Paragraph(e["payer_name"], cell_style),
+            Paragraph(f"<b>{e['payer_name']}</b>", cell_style),
             Paragraph(mode, cell_style),
-            Paragraph(e["split_type"].capitalize(), cell_style),
-            Paragraph(f"<b>{curr_symbol}{e['amount']:,.2f}</b>", cell_bold_style),
+            Paragraph(split_html, cell_style),
+            Paragraph(f"<b>{curr_symbol}{e['amount']:,.2f}</b>", amount_cell_style),
         ])
 
-    t_exp = Table(exp_table_data, colWidths=[55, 125, 65, 75, 65, 60, 75])
+    t_exp = Table(exp_table_data, colWidths=[65, 115, 55, 65, 45, 105, 73])
     t_exp.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1E293B")),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
         ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('PADDING', (0, 0), (-1, -1), 4.5),
     ]))
     story.append(t_exp)
+
+    # Build PDF
+    doc.build(story, canvasmaker=NumberedCanvas)
+    buffer.seek(0)
+    return buffer
+
+
+def get_member_full_data(trip_id: int, member_id: int) -> Dict[str, Any]:
+    settlement_data = calculate_trip_settlement(trip_id)
+    trip = settlement_data["trip"]
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM members WHERE id = ? AND trip_id = ?", (member_id, trip_id))
+    member_row = cursor.fetchone()
+    if not member_row:
+        conn.close()
+        raise ValueError("Member not found in trip")
+    member = dict(member_row)
+
+    # 1. Expenses PAID BY this member
+    cursor.execute("""
+        SELECT e.*, m.name as payer_name
+        FROM expenses e
+        JOIN members m ON e.payer_id = m.id
+        WHERE e.trip_id = ? AND e.payer_id = ?
+        ORDER BY e.date ASC, e.id ASC
+    """, (trip_id, member_id))
+    paid_expenses = []
+    for r in cursor.fetchall():
+        exp = dict(r)
+        cursor.execute("""
+            SELECT es.*, m.name as member_name
+            FROM expense_splits es
+            JOIN members m ON es.member_id = m.id
+            WHERE es.expense_id = ?
+        """, (exp["id"],))
+        exp["splits"] = [dict(s) for s in cursor.fetchall()]
+        paid_expenses.append(exp)
+
+    # 2. Expenses SHARED BY this member (where someone else was the upfront payer)
+    cursor.execute("""
+        SELECT e.*, m.name as payer_name, es.share_amount as member_share, es.percentage as member_percentage
+        FROM expense_splits es
+        JOIN expenses e ON es.expense_id = e.id
+        JOIN members m ON e.payer_id = m.id
+        WHERE e.trip_id = ? AND es.member_id = ? AND e.payer_id != ?
+        ORDER BY e.date ASC, e.id ASC
+    """, (trip_id, member_id, member_id))
+    shared_expenses = [dict(r) for r in cursor.fetchall()]
+
+    # 3. Direct settlements history involving this member
+    cursor.execute("""
+        SELECT sp.*, p.name as payer_name, r.name as receiver_name
+        FROM settlement_payments sp
+        JOIN members p ON sp.payer_id = p.id
+        JOIN members r ON sp.receiver_id = r.id
+        WHERE sp.trip_id = ? AND (sp.payer_id = ? OR sp.receiver_id = ?)
+        ORDER BY sp.date DESC, sp.id DESC
+    """, (trip_id, member_id, member_id))
+    settlement_history = [dict(r) for r in cursor.fetchall()]
+
+    conn.close()
+
+    member_stat = next((m for m in settlement_data["member_stats"] if m["id"] == member_id), None)
+    member_settlements_to_pay = [s for s in settlement_data["settlements"] if s["from_id"] == member_id]
+    member_settlements_to_receive = [s for s in settlement_data["settlements"] if s["to_id"] == member_id]
+
+    return {
+        "trip": trip,
+        "member": member,
+        "member_stat": member_stat,
+        "paid_expenses": paid_expenses,
+        "shared_expenses": shared_expenses,
+        "settlement_history": settlement_history,
+        "settlements_to_pay": member_settlements_to_pay,
+        "settlements_to_receive": member_settlements_to_receive,
+        "all_members_count": settlement_data["member_count"]
+    }
+
+
+def generate_member_pdf(trip_id: int, member_id: int) -> io.BytesIO:
+    data = get_member_full_data(trip_id, member_id)
+    trip = data["trip"]
+    member = data["member"]
+    currency = trip.get("currency", "₹")
+    curr_symbol = "Rs. " if currency == "₹" else f"{currency} "
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=36,
+        rightMargin=36,
+        topMargin=36,
+        bottomMargin=36
+    )
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'DocTitle',
+        parent=styles['Heading1'],
+        fontName='Helvetica-Bold',
+        fontSize=18,
+        leading=22,
+        textColor=colors.HexColor("#1E1B4B"),
+        spaceAfter=3
+    )
+    subtitle_style = ParagraphStyle(
+        'DocSubtitle',
+        parent=styles['Normal'],
+        fontName='Helvetica-Oblique',
+        fontSize=9.5,
+        leading=13,
+        textColor=colors.HexColor("#475569"),
+        spaceAfter=10
+    )
+    h2_style = ParagraphStyle(
+        'Heading2Custom',
+        parent=styles['Heading2'],
+        fontName='Helvetica-Bold',
+        fontSize=11,
+        leading=15,
+        textColor=colors.HexColor("#312E81"),
+        spaceBefore=12,
+        spaceAfter=5
+    )
+    cell_style = ParagraphStyle(
+        'TableCell',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=8,
+        leading=10.5,
+        textColor=colors.HexColor("#1F2937")
+    )
+    cell_bold_style = ParagraphStyle(
+        'TableCellBold',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=8,
+        leading=10.5,
+        textColor=colors.HexColor("#1F2937")
+    )
+    amount_cell_style = ParagraphStyle(
+        'AmountCell',
+        parent=cell_bold_style,
+        alignment=2
+    )
+    header_cell_style = ParagraphStyle(
+        'HeaderCell',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=8.5,
+        leading=11,
+        textColor=colors.white
+    )
+    header_right_style = ParagraphStyle(
+        'HeaderRight',
+        parent=header_cell_style,
+        alignment=2
+    )
+
+    story = []
+
+    clean_trip_name = trip['name'].encode('ascii', 'ignore').decode().strip() or trip['name']
+    clean_member_name = member['name'].encode('ascii', 'ignore').decode().strip() or member['name']
+    member_phone = member.get('phone') or 'Not provided'
+
+    # Title Banner
+    story.append(Paragraph(f"Individual Traveler Statement: {clean_member_name}", title_style))
+    gen_time = datetime.now().strftime("%d %b %Y, %I:%M %p")
+    story.append(Paragraph(f"Trip: <b>{clean_trip_name}</b> | Phone: {member_phone} | Generated: {gen_time} | Currency: {trip.get('currency', '₹')}", subtitle_style))
+    story.append(Spacer(1, 4))
+
+    # KPI Summary Card for this member
+    m_stat = data.get("member_stat") or {"total_paid": 0.0, "total_owed": 0.0, "net_balance": 0.0}
+    net_val = m_stat.get("net_balance", 0.0)
+    if net_val > 0.009:
+        net_status = "Gets Back (To Receive)"
+        net_str = f"+{curr_symbol}{abs(net_val):,.2f}"
+        net_color = colors.HexColor("#065F46")
+        net_bg = colors.HexColor("#ECFDF5")
+    elif net_val < -0.009:
+        net_status = "Owes (To Pay)"
+        net_str = f"-{curr_symbol}{abs(net_val):,.2f}"
+        net_color = colors.HexColor("#991B1B")
+        net_bg = colors.HexColor("#FEF2F2")
+    else:
+        net_status = "All Settled Up"
+        net_str = f"{curr_symbol}0.00"
+        net_color = colors.HexColor("#334155")
+        net_bg = colors.HexColor("#F1F5F9")
+
+    kpi_data = [
+        [
+            Paragraph("<b>Total Paid Upfront</b>", cell_style),
+            Paragraph("<b>Fair Share (Consumed)</b>", cell_style),
+            Paragraph(f"<b>Net Position ({net_status})</b>", cell_style),
+            Paragraph("<b>Associated Bills</b>", cell_style)
+        ],
+        [
+            Paragraph(f"<b>{curr_symbol}{m_stat['total_paid']:,.2f}</b>", ParagraphStyle('KP1', parent=cell_style, fontSize=11, fontName='Helvetica-Bold', textColor=colors.HexColor("#1E1B4B"))),
+            Paragraph(f"<b>{curr_symbol}{m_stat['total_owed']:,.2f}</b>", ParagraphStyle('KP2', parent=cell_style, fontSize=11, fontName='Helvetica-Bold', textColor=colors.HexColor("#1E1B4B"))),
+            Paragraph(f"<b>{net_str}</b>", ParagraphStyle('KP3', parent=cell_style, fontSize=11, fontName='Helvetica-Bold', textColor=net_color)),
+            Paragraph(f"<b>{len(data['paid_expenses']) + len(data['shared_expenses'])} Items</b>", ParagraphStyle('KP4', parent=cell_style, fontSize=11, fontName='Helvetica-Bold', textColor=colors.HexColor("#1E1B4B")))
+        ]
+    ]
+    t_kpi = Table(kpi_data, colWidths=[130, 130, 150, 113])
+    t_kpi.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor("#EEF2FF")),
+        ('BACKGROUND', (1, 0), (1, -1), colors.HexColor("#F8FAFC")),
+        ('BACKGROUND', (2, 0), (2, -1), net_bg),
+        ('BACKGROUND', (3, 0), (3, -1), colors.HexColor("#F1F5F9")),
+        ('BOX', (0, 0), (-1, -1), 1, colors.HexColor("#CBD5E1")),
+        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
+        ('PADDING', (0, 0), (-1, -1), 5),
+    ]))
+    story.append(t_kpi)
+    story.append(Spacer(1, 10))
+
+    # Section 1: Settlements for this Member
+    story.append(Paragraph(f"1. Direct Settlement Instructions for {clean_member_name}", h2_style))
+    settle_rows = []
+    if data["settlements_to_receive"]:
+        for s in data["settlements_to_receive"]:
+            settle_rows.append([
+                Paragraph(f"<b>{s['from_name']}</b>", cell_style),
+                Paragraph("owes and pays ➔", cell_style),
+                Paragraph(f"<b>{clean_member_name}</b>", cell_style),
+                Paragraph(f"<b>+{curr_symbol}{s['amount']:,.2f}</b>", ParagraphStyle('GreenA', parent=amount_cell_style, textColor=colors.HexColor("#065F46")))
+            ])
+    if data["settlements_to_pay"]:
+        for s in data["settlements_to_pay"]:
+            settle_rows.append([
+                Paragraph(f"<b>{clean_member_name}</b>", cell_style),
+                Paragraph("owes and pays ➔", cell_style),
+                Paragraph(f"<b>{s['to_name']}</b>", cell_style),
+                Paragraph(f"<b>-{curr_symbol}{s['amount']:,.2f}</b>", ParagraphStyle('RedA', parent=amount_cell_style, textColor=colors.HexColor("#991B1B")))
+            ])
+
+    if settle_rows:
+        s_table_data = [[
+            Paragraph("<b>Payer</b>", header_cell_style),
+            Paragraph("<b>Action</b>", header_cell_style),
+            Paragraph("<b>Receiver</b>", header_cell_style),
+            Paragraph("<b>Amount</b>", header_right_style),
+        ]] + settle_rows
+        t_s = Table(s_table_data, colWidths=[150, 90, 150, 133])
+        t_s.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#4F46E5")),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('PADDING', (0, 0), (-1, -1), 4),
+        ]))
+        story.append(t_s)
+    else:
+        story.append(Paragraph("No pending settlements. This traveler is completely settled up!", cell_style))
+
+    story.append(Spacer(1, 10))
+
+    # Section 2: Expenses PAID UPFRONT by this member
+    story.append(Paragraph(f"2. Expenses Paid Upfront by {clean_member_name}", h2_style))
+    if data["paid_expenses"]:
+        paid_table_data = [[
+            Paragraph("<b>Date</b>", header_cell_style),
+            Paragraph("<b>Expense Title</b>", header_cell_style),
+            Paragraph("<b>Category</b>", header_cell_style),
+            Paragraph("<b>Mode</b>", header_cell_style),
+            Paragraph("<b>Split With</b>", header_cell_style),
+            Paragraph("<b>Total Bill</b>", header_right_style),
+            Paragraph("<b>Own Share</b>", header_right_style),
+            Paragraph("<b>To Recover</b>", header_right_style),
+        ]]
+        total_paid_sum = 0.0
+        total_recover_sum = 0.0
+        for pe in data["paid_expenses"]:
+            raw_date = pe.get("date", "")
+            try:
+                display_date = datetime.strptime(raw_date, "%Y-%m-%d").strftime("%d %b %Y")
+            except Exception:
+                display_date = raw_date
+
+            clean_title = pe["title"].encode('ascii', 'ignore').decode().strip() or pe["title"]
+            mode = pe.get("payment_mode") or "UPI"
+            splits = pe.get("splits", [])
+            own_s = next((s for s in splits if s["member_id"] == member_id), None)
+            own_share = own_s["share_amount"] if own_s else 0.0
+            to_recover = pe["amount"] - own_share
+            total_paid_sum += pe["amount"]
+            total_recover_sum += to_recover
+
+            names = ", ".join(s["member_name"] for s in splits)
+            paid_table_data.append([
+                Paragraph(f"<b>{display_date}</b>", cell_style),
+                Paragraph(clean_title, cell_style),
+                Paragraph(pe["category"], cell_style),
+                Paragraph(mode, cell_style),
+                Paragraph(f"<font size='7' color='#475569'>{names}</font>", cell_style),
+                Paragraph(f"{curr_symbol}{pe['amount']:,.2f}", amount_cell_style),
+                Paragraph(f"{curr_symbol}{own_share:,.2f}", amount_cell_style),
+                Paragraph(f"<b>+{curr_symbol}{to_recover:,.2f}</b>", ParagraphStyle('Rec', parent=amount_cell_style, textColor=colors.HexColor("#065F46"))),
+            ])
+
+        paid_table_data.append([
+            Paragraph("<b>TOTALS</b>", cell_bold_style),
+            Paragraph("", cell_style),
+            Paragraph("", cell_style),
+            Paragraph("", cell_style),
+            Paragraph("", cell_style),
+            Paragraph(f"<b>{curr_symbol}{total_paid_sum:,.2f}</b>", amount_cell_style),
+            Paragraph("", cell_style),
+            Paragraph(f"<b>+{curr_symbol}{total_recover_sum:,.2f}</b>", ParagraphStyle('TotRec', parent=amount_cell_style, textColor=colors.HexColor("#065F46"))),
+        ])
+
+        t_paid = Table(paid_table_data, colWidths=[58, 105, 50, 42, 100, 56, 56, 56])
+        t_paid.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1E293B")),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor("#F1F5F9")),
+            ('PADDING', (0, 0), (-1, -1), 3.5),
+        ]))
+        story.append(t_paid)
+    else:
+        story.append(Paragraph(f"No expenses paid upfront by {clean_member_name}.", cell_style))
+
+    story.append(Spacer(1, 10))
+
+    # Section 3: Expenses SHARED by this member (paid by others)
+    story.append(Paragraph(f"3. Expenses Shared by {clean_member_name} (Paid by Other Travelers)", h2_style))
+    if data["shared_expenses"]:
+        shared_table_data = [[
+            Paragraph("<b>Date</b>", header_cell_style),
+            Paragraph("<b>Expense Title</b>", header_cell_style),
+            Paragraph("<b>Category</b>", header_cell_style),
+            Paragraph("<b>Paid Upfront By</b>", header_cell_style),
+            Paragraph("<b>Total Bill</b>", header_right_style),
+            Paragraph("<b>Share Owed</b>", header_right_style),
+        ]]
+        total_owed_sum = 0.0
+        for se in data["shared_expenses"]:
+            raw_date = se.get("date", "")
+            try:
+                display_date = datetime.strptime(raw_date, "%Y-%m-%d").strftime("%d %b %Y")
+            except Exception:
+                display_date = raw_date
+
+            clean_title = se["title"].encode('ascii', 'ignore').decode().strip() or se["title"]
+            share_val = se.get("member_share", 0.0)
+            total_owed_sum += share_val
+
+            shared_table_data.append([
+                Paragraph(f"<b>{display_date}</b>", cell_style),
+                Paragraph(clean_title, cell_style),
+                Paragraph(se["category"], cell_style),
+                Paragraph(f"<b>{se['payer_name']}</b>", cell_style),
+                Paragraph(f"{curr_symbol}{se['amount']:,.2f}", amount_cell_style),
+                Paragraph(f"<b>-{curr_symbol}{share_val:,.2f}</b>", ParagraphStyle('OweVal', parent=amount_cell_style, textColor=colors.HexColor("#991B1B"))),
+            ])
+
+        shared_table_data.append([
+            Paragraph("<b>TOTAL OWED</b>", cell_bold_style),
+            Paragraph("", cell_style),
+            Paragraph("", cell_style),
+            Paragraph("", cell_style),
+            Paragraph("", cell_style),
+            Paragraph(f"<b>-{curr_symbol}{total_owed_sum:,.2f}</b>", ParagraphStyle('TotOwe', parent=amount_cell_style, textColor=colors.HexColor("#991B1B"))),
+        ])
+
+        t_shared = Table(shared_table_data, colWidths=[65, 138, 65, 95, 80, 80])
+        t_shared.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#334155")),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor("#F1F5F9")),
+            ('PADDING', (0, 0), (-1, -1), 4),
+        ]))
+        story.append(t_shared)
+    else:
+        story.append(Paragraph(f"No shared expenses where others paid for {clean_member_name}.", cell_style))
 
     # Build PDF
     doc.build(story, canvasmaker=NumberedCanvas)
