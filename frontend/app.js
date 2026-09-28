@@ -144,17 +144,22 @@ function updateUserUI(user) {
 }
 
 // Password Visibility Toggle (Show / Hide Password)
+const EYE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>`;
+const EYE_OFF_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><line x1="2" x2="22" y1="2" y2="22"/></svg>`;
+
 function togglePasswordVisibility(inputId, iconId) {
   const input = document.getElementById(inputId);
-  const icon = document.getElementById(iconId);
   if (!input) return;
   const isPassword = input.type === 'password';
   input.type = isPassword ? 'text' : 'password';
-  if (icon) {
-    icon.setAttribute('data-lucide', isPassword ? 'eye-off' : 'eye');
-    if (window.lucide) lucide.createIcons();
+
+  const iconContainer = document.getElementById(iconId);
+  if (iconContainer) {
+    iconContainer.innerHTML = isPassword ? EYE_OFF_ICON_SVG : EYE_ICON_SVG;
   }
 }
+window.togglePasswordVisibility = togglePasswordVisibility;
+
 
 function openAuthModal() {
   const modal = document.getElementById('authModal');
@@ -213,6 +218,7 @@ function switchAuthTab(tab) {
   }
   lucide.createIcons();
 }
+window.switchAuthTab = switchAuthTab;
 
 function showAuthAlert(msg) {
   const alertBox = document.getElementById('authAlert');

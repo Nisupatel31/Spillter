@@ -14,7 +14,20 @@
   <!-- Tesseract.js CDN for Client-Side OCR -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   
-  <link rel="stylesheet" href="/static/style.css?v=3" />
+  <link rel="stylesheet" href="/static/style.css?v=20260928_v5" />
+  <script>
+    // Immediate inline handlers ensuring togglePasswordVisibility is 100% available without caching delays
+    const EYE_SVG_RAW = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>';
+    const EYE_OFF_SVG_RAW = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><line x1="2" x2="22" y1="2" y2="22"/></svg>';
+    window.togglePasswordVisibility = function(inputId, iconId) {
+      const input = document.getElementById(inputId);
+      if (!input) return;
+      const isPass = input.type === 'password';
+      input.type = isPass ? 'text' : 'password';
+      const icon = document.getElementById(iconId);
+      if (icon) icon.innerHTML = isPass ? EYE_OFF_SVG_RAW : EYE_SVG_RAW;
+    };
+  </script>
   <style>
     /* Force-hide up and down stepper arrows on all number inputs */
     input::-webkit-outer-spin-button,
@@ -1146,12 +1159,14 @@
             <button type="button" onclick="switchAuthTab('forgot')" class="text-xs font-bold text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 hover:underline transition">Forgot Password?</button>
           </div>
           <div class="relative">
-            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400 pointer-events-none">
               <i data-lucide="lock" class="w-4 h-4"></i>
             </span>
-            <input type="password" id="loginPassword" required placeholder="••••••••" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl pl-10 pr-10 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white dark:focus:bg-slate-800" />
-            <button type="button" onclick="togglePasswordVisibility('loginPassword', 'loginPasswordEye')" class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 focus:outline-none" title="Show/Hide Password">
-              <i id="loginPasswordEye" data-lucide="eye" class="w-4 h-4"></i>
+            <input type="password" id="loginPassword" required placeholder="••••••••" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl pl-10 pr-11 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white dark:focus:bg-slate-800" />
+            <button type="button" onclick="togglePasswordVisibility('loginPassword', 'loginPasswordEye')" class="absolute inset-y-0 right-0 pr-3.5 pl-2 flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 focus:outline-none cursor-pointer z-10" title="Show/Hide Password" aria-label="Toggle password visibility">
+              <span id="loginPasswordEye" class="flex items-center justify-center pointer-events-none">
+                <i data-lucide="eye" class="w-4 h-4"></i>
+              </span>
             </button>
           </div>
         </div>
@@ -1166,7 +1181,7 @@
         <div>
           <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Full Name *</label>
           <div class="relative">
-            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400 pointer-events-none">
               <i data-lucide="user" class="w-4 h-4"></i>
             </span>
             <input type="text" id="signupName" required placeholder="Nisarg Patel" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl pl-10 pr-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white dark:focus:bg-slate-800" />
@@ -1176,7 +1191,7 @@
         <div>
           <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Email Address *</label>
           <div class="relative">
-            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400 pointer-events-none">
               <i data-lucide="mail" class="w-4 h-4"></i>
             </span>
             <input type="email" id="signupEmail" required placeholder="you@traveler.com" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl pl-10 pr-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white dark:focus:bg-slate-800" />
@@ -1186,7 +1201,7 @@
         <div>
           <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Mobile Number (Optional)</label>
           <div class="relative">
-            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400 pointer-events-none">
               <i data-lucide="phone" class="w-4 h-4"></i>
             </span>
             <input type="tel" id="signupPhone" placeholder="+91 98765 43210" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl pl-10 pr-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white dark:focus:bg-slate-800" />
@@ -1196,12 +1211,14 @@
         <div>
           <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Password *</label>
           <div class="relative">
-            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400 pointer-events-none">
               <i data-lucide="lock" class="w-4 h-4"></i>
             </span>
-            <input type="password" id="signupPassword" required minlength="4" placeholder="At least 4 characters" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl pl-10 pr-10 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white dark:focus:bg-slate-800" />
-            <button type="button" onclick="togglePasswordVisibility('signupPassword', 'signupPasswordEye')" class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 focus:outline-none" title="Show/Hide Password">
-              <i id="signupPasswordEye" data-lucide="eye" class="w-4 h-4"></i>
+            <input type="password" id="signupPassword" required minlength="4" placeholder="At least 4 characters" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl pl-10 pr-11 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white dark:focus:bg-slate-800" />
+            <button type="button" onclick="togglePasswordVisibility('signupPassword', 'signupPasswordEye')" class="absolute inset-y-0 right-0 pr-3.5 pl-2 flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 focus:outline-none cursor-pointer z-10" title="Show/Hide Password" aria-label="Toggle password visibility">
+              <span id="signupPasswordEye" class="flex items-center justify-center pointer-events-none">
+                <i data-lucide="eye" class="w-4 h-4"></i>
+              </span>
             </button>
           </div>
         </div>
@@ -1216,7 +1233,7 @@
         <div>
           <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Registered Email Address *</label>
           <div class="relative">
-            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400 pointer-events-none">
               <i data-lucide="mail" class="w-4 h-4"></i>
             </span>
             <input type="email" id="resetEmail" required placeholder="you@traveler.com" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl pl-10 pr-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white dark:focus:bg-slate-800" />
@@ -1227,12 +1244,14 @@
         <div>
           <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">New Password *</label>
           <div class="relative">
-            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400 pointer-events-none">
               <i data-lucide="key-round" class="w-4 h-4"></i>
             </span>
-            <input type="password" id="resetNewPassword" required minlength="4" placeholder="Enter new password" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl pl-10 pr-10 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white dark:focus:bg-slate-800" />
-            <button type="button" onclick="togglePasswordVisibility('resetNewPassword', 'resetNewPasswordEye')" class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 focus:outline-none" title="Show/Hide Password">
-              <i id="resetNewPasswordEye" data-lucide="eye" class="w-4 h-4"></i>
+            <input type="password" id="resetNewPassword" required minlength="4" placeholder="Enter new password" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl pl-10 pr-11 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white dark:focus:bg-slate-800" />
+            <button type="button" onclick="togglePasswordVisibility('resetNewPassword', 'resetNewPasswordEye')" class="absolute inset-y-0 right-0 pr-3.5 pl-2 flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 focus:outline-none cursor-pointer z-10" title="Show/Hide Password" aria-label="Toggle password visibility">
+              <span id="resetNewPasswordEye" class="flex items-center justify-center pointer-events-none">
+                <i data-lucide="eye" class="w-4 h-4"></i>
+              </span>
             </button>
           </div>
         </div>
@@ -1240,12 +1259,14 @@
         <div>
           <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Confirm New Password *</label>
           <div class="relative">
-            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400 pointer-events-none">
               <i data-lucide="check-check" class="w-4 h-4"></i>
             </span>
-            <input type="password" id="resetConfirmPassword" required minlength="4" placeholder="Re-type new password" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl pl-10 pr-10 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white dark:focus:bg-slate-800" />
-            <button type="button" onclick="togglePasswordVisibility('resetConfirmPassword', 'resetConfirmPasswordEye')" class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 focus:outline-none" title="Show/Hide Password">
-              <i id="resetConfirmPasswordEye" data-lucide="eye" class="w-4 h-4"></i>
+            <input type="password" id="resetConfirmPassword" required minlength="4" placeholder="Re-type new password" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl pl-10 pr-11 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white dark:focus:bg-slate-800" />
+            <button type="button" onclick="togglePasswordVisibility('resetConfirmPassword', 'resetConfirmPasswordEye')" class="absolute inset-y-0 right-0 pr-3.5 pl-2 flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 focus:outline-none cursor-pointer z-10" title="Show/Hide Password" aria-label="Toggle password visibility">
+              <span id="resetConfirmPasswordEye" class="flex items-center justify-center pointer-events-none">
+                <i data-lucide="eye" class="w-4 h-4"></i>
+              </span>
             </button>
           </div>
         </div>
@@ -1699,6 +1720,6 @@
     <span id="toastMsg">Notification message</span>
   </div>
 
-  <script src="/static/app.js?v=3"></script>
+  <script src="/static/app.js?v=20260928_v5"></script>
 </body>
 </html>

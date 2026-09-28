@@ -989,13 +989,21 @@ def api_get_mileage_summary(trip_id: int):
     return calculate_trip_mileage_summary(trip_id)
 
 
-# Mount static files for frontend SPA
+# Mount static files for frontend SPA with no-cache headers to prevent stale asset issues
+class NoCacheStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+
 if os.path.isdir(FRONTEND_DIR):
-    app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+    app.mount("/static", NoCacheStaticFiles(directory=FRONTEND_DIR), name="static")
 
 @app.get("/")
 def serve_index():
     index_path = os.path.join(FRONTEND_DIR, "index.html")
     if os.path.exists(index_path):
-        return FileResponse(index_path, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+        return FileResponse(index_path, headers={"Cache-Control": "no-cache, no-store, must-revalidate, max-age=0"})
     return {"message": "Spillter API running. Frontend will be served from /static"}
