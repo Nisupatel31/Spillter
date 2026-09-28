@@ -48,6 +48,10 @@ class UserLogin(BaseModel):
     email: str
     password: str
 
+class ResetPasswordRequest(BaseModel):
+    email: str
+    new_password: str
+
 class TripCreate(BaseModel):
     name: str
     description: Optional[str] = ""
@@ -234,6 +238,50 @@ def logout(authorization: Optional[str] = Header(None), x_session_token: Optiona
         conn.commit()
         conn.close()
     return {"message": "Logged out successfully"}
+
+@app.post("/api/auth/reset-password")
+def reset_password(payload: ResetPasswordRequest):
+    email = payload.email.strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email address is required")
+    if not payload.new_password or len(payload.new_password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters long")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, name, email, mobile FROM users WHERE LOWER(email) = ?", (email,))
+    user_row = cursor.fetchone()
+    if not user_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="No account found with this email address. Please check your spelling or sign up.")
+
+    user = dict(user_row)
+    user_id = user["id"]
+    new_hash = hash_password(payload.new_password)
+
+    cursor.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, user_id))
+    cursor.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+
+    token = secrets.token_hex(24)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute("""
+        INSERT INTO sessions (token, user_id, created_at)
+        VALUES (?, ?, ?)
+    """, (token, user_id, now))
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "message": "Password updated successfully! Welcome back.",
+        "token": token,
+        "user": {
+            "id": user["id"],
+            "name": user["name"],
+            "email": user["email"],
+            "mobile": user.get("mobile") or ""
+        }
+    }
 
 
 # ----------------- TRIP ENDPOINTS -----------------

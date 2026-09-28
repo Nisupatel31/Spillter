@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
-from backend.database import init_db
+from backend.database import init_db, get_db_connection
 
 client = TestClient(app)
 
@@ -13,32 +13,56 @@ def test_root():
     response = client.get("/")
     assert response.status_code == 200
 
-def test_list_trips():
-    response = client.get("/api/trips")
-    assert response.status_code == 200
-    trips = response.json()
-    assert len(trips) >= 1
-    assert "name" in trips[0]
+def test_list_and_dashboard_flow():
+    # 1. Create a fresh trip
+    trip_res = client.post("/api/trips", json={
+        "name": "Integration Test Trip",
+        "description": "Testing dashboard and settlement",
+        "currency": "₹"
+    })
+    assert trip_res.status_code == 200
+    trip_id = trip_res.json()["id"]
 
-def test_get_dashboard():
-    response = client.get("/api/trips/1/dashboard")
-    assert response.status_code == 200
-    data = response.json()
-    assert "kpis" in data
-    assert data["kpis"]["total_spent"] > 0
-    assert "category_breakdown" in data
-    assert "member_spending" in data
-    assert "settlements" in data
+    # 2. Verify list trips contains created trip
+    list_res = client.get("/api/trips")
+    assert list_res.status_code == 200
+    trips = list_res.json()
+    assert any(t["id"] == trip_id for t in trips)
 
-def test_get_settlement_and_whatsapp():
-    response = client.get("/api/trips/1/settlement")
-    assert response.status_code == 200
-    data = response.json()
-    assert "settlements" in data
-    assert "whatsapp_text" in data
-    assert "whatsapp_url" in data
-    assert "api.whatsapp.com" in data["whatsapp_url"]
-    assert len(data["settlements"]) > 0
+    # 3. Add members & an expense
+    m1 = client.post(f"/api/trips/{trip_id}/members", json={"name": "P1"}).json()["id"]
+    m2 = client.post(f"/api/trips/{trip_id}/members", json={"name": "P2"}).json()["id"]
+    exp_res = client.post(f"/api/trips/{trip_id}/expenses", json={
+        "title": "Welcome Lunch",
+        "amount": 2000.0,
+        "date": "2026-09-01",
+        "category": "Food",
+        "payer_id": m1,
+        "split_type": "equal",
+        "splits": [
+            {"member_id": m1, "share_amount": 1000.0},
+            {"member_id": m2, "share_amount": 1000.0}
+        ]
+    })
+    assert exp_res.status_code == 200
+
+    # 4. Test dashboard
+    dash_res = client.get(f"/api/trips/{trip_id}/dashboard")
+    assert dash_res.status_code == 200
+    dash_data = dash_res.json()
+    assert "kpis" in dash_data
+    assert dash_data["kpis"]["total_spent"] == 2000.0
+    assert "category_breakdown" in dash_data
+
+    # 5. Test settlement & whatsapp
+    settle_res = client.get(f"/api/trips/{trip_id}/settlement")
+    assert settle_res.status_code == 200
+    settle_data = settle_res.json()
+    assert "settlements" in settle_data
+    assert len(settle_data["settlements"]) == 1
+    assert "whatsapp_text" in settle_data
+    assert "whatsapp_url" in settle_data
+    assert "api.whatsapp.com" in settle_data["whatsapp_url"]
 
 def test_add_trip_and_custom_splits():
     # 1. Create a new test trip
@@ -158,45 +182,74 @@ def test_add_trip_and_custom_splits():
 
 
 def test_auth_flow():
-    # 1. Test Demo User Login
-    login_res = client.post("/api/auth/login", json={
-        "email": "nisarg@travel.com",
-        "password": "password123"
-    })
-    assert login_res.status_code == 200
-    login_data = login_res.json()
-    assert "token" in login_data
-    assert login_data["user"]["email"] == "nisarg@travel.com"
-    token = login_data["token"]
-
-    # 2. Test /api/auth/me with Bearer token
-    me_res = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
-    assert me_res.status_code == 200
-    assert me_res.json()["name"] == "Nisarg Patel"
-
-    # 3. Test Invalid Login
-    bad_login = client.post("/api/auth/login", json={
-        "email": "nisarg@travel.com",
-        "password": "wrongpassword"
-    })
-    assert bad_login.status_code == 401
-
-    # 4. Test New User Signup
     import time
     unique_email = f"traveler_{int(time.time())}@example.com"
+
+    # 1. Test New User Signup
     signup_res = client.post("/api/auth/signup", json={
         "name": "Sarah Jenkins",
         "email": unique_email,
         "mobile": "+91 9988776655",
-        "password": "securepassword"
+        "password": "initialpassword"
     })
     assert signup_res.status_code == 200
     signup_data = signup_res.json()
     assert "token" in signup_data
     assert signup_data["user"]["name"] == "Sarah Jenkins"
-    sarah_token = signup_data["token"]
+    token = signup_data["token"]
 
-    # 5. Duplicate Email Signup check
+    # 2. Test /api/auth/me with Bearer token
+    me_res = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me_res.status_code == 200
+    assert me_res.json()["name"] == "Sarah Jenkins"
+
+    # 3. Test Login with Initial Password
+    login_res = client.post("/api/auth/login", json={
+        "email": unique_email,
+        "password": "initialpassword"
+    })
+    assert login_res.status_code == 200
+    assert "token" in login_res.json()
+
+    # 4. Test Invalid Login
+    bad_login = client.post("/api/auth/login", json={
+        "email": unique_email,
+        "password": "wrongpassword"
+    })
+    assert bad_login.status_code == 401
+
+    # 5. Test Password Reset with Unregistered Email (expect 404)
+    bad_reset = client.post("/api/auth/reset-password", json={
+        "email": "nonexistent_traveler@example.com",
+        "new_password": "newpassword123"
+    })
+    assert bad_reset.status_code == 404
+
+    # 6. Test Password Reset for Registered User
+    reset_res = client.post("/api/auth/reset-password", json={
+        "email": unique_email,
+        "new_password": "newsecurepassword456"
+    })
+    assert reset_res.status_code == 200
+    reset_data = reset_res.json()
+    assert "token" in reset_data
+    reset_token = reset_data["token"]
+
+    # 7. Test Login with New Password
+    new_login = client.post("/api/auth/login", json={
+        "email": unique_email,
+        "password": "newsecurepassword456"
+    })
+    assert new_login.status_code == 200
+
+    # Old password should no longer work
+    old_login = client.post("/api/auth/login", json={
+        "email": unique_email,
+        "password": "initialpassword"
+    })
+    assert old_login.status_code == 401
+
+    # 8. Duplicate Email Signup check
     dup_res = client.post("/api/auth/signup", json={
         "name": "Sarah Duplicate",
         "email": unique_email,
@@ -204,13 +257,27 @@ def test_auth_flow():
     })
     assert dup_res.status_code == 400
 
-    # 6. Test User Logout
-    logout_res = client.post("/api/auth/logout", headers={"Authorization": f"Bearer {sarah_token}"})
+    # 9. Test User Logout
+    logout_res = client.post("/api/auth/logout", headers={"Authorization": f"Bearer {reset_token}"})
     assert logout_res.status_code == 200
 
-    # Sarah token should now be invalid
-    me_after_logout = client.get("/api/auth/me", headers={"Authorization": f"Bearer {sarah_token}"})
+    # Token should now be invalid
+    me_after_logout = client.get("/api/auth/me", headers={"Authorization": f"Bearer {reset_token}"})
     assert me_after_logout.status_code == 401
+
+def test_demo_data_absence():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) as cnt FROM users WHERE email = 'nisarg@travel.com'")
+    row = cursor.fetchone()
+    cnt = row[0] if isinstance(row, (tuple, list)) else row["cnt"]
+    assert cnt == 0, f"Expected 0 demo users, found {cnt}"
+
+    cursor.execute("SELECT COUNT(*) as cnt FROM trips WHERE name LIKE '%Goa Beach & Road Trip%'")
+    row = cursor.fetchone()
+    trip_cnt = row[0] if isinstance(row, (tuple, list)) else row["cnt"]
+    assert trip_cnt == 0, f"Expected 0 demo trips, found {trip_cnt}"
+    conn.close()
 
 
 def test_payment_mode_in_expenses():
@@ -423,9 +490,7 @@ def test_member_pdf_export():
 if __name__ == "__main__":
     init_db()
     test_root()
-    test_list_trips()
-    test_get_dashboard()
-    test_get_settlement_and_whatsapp()
+    test_list_and_dashboard_flow()
     test_add_trip_and_custom_splits()
     test_trip_update_and_delete()
     test_expense_update()

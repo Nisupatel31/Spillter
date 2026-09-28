@@ -143,33 +143,75 @@ function updateUserUI(user) {
   }
 }
 
+// Password Visibility Toggle (Show / Hide Password)
+function togglePasswordVisibility(inputId, iconId) {
+  const input = document.getElementById(inputId);
+  const icon = document.getElementById(iconId);
+  if (!input) return;
+  const isPassword = input.type === 'password';
+  input.type = isPassword ? 'text' : 'password';
+  if (icon) {
+    icon.setAttribute('data-lucide', isPassword ? 'eye-off' : 'eye');
+    if (window.lucide) lucide.createIcons();
+  }
+}
+
 function openAuthModal() {
   const modal = document.getElementById('authModal');
   if (modal) modal.classList.remove('hidden');
   const alertBox = document.getElementById('authAlert');
   if (alertBox) alertBox.classList.add('hidden');
+  switchAuthTab('login');
   lucide.createIcons();
 }
 
 function switchAuthTab(tab) {
   const tabLogin = document.getElementById('tabBtnLogin');
   const tabSignup = document.getElementById('tabBtnSignup');
+  const tabsNav = document.getElementById('authTabsNav');
   const loginForm = document.getElementById('loginForm');
   const signupForm = document.getElementById('signupForm');
+  const forgotForm = document.getElementById('forgotPasswordForm');
   const alertBox = document.getElementById('authAlert');
+  const titleEl = document.getElementById('authModalTitle');
+  const subtitleEl = document.getElementById('authModalSubtitle');
+
   if (alertBox) alertBox.classList.add('hidden');
 
   if (tab === 'login') {
-    tabLogin.className = 'py-2 text-xs font-bold rounded-xl transition bg-white text-brand-700 shadow-xs';
-    tabSignup.className = 'py-2 text-xs font-bold rounded-xl transition text-slate-500 hover:text-slate-900';
-    loginForm.classList.remove('hidden');
-    signupForm.classList.add('hidden');
-  } else {
-    tabSignup.className = 'py-2 text-xs font-bold rounded-xl transition bg-white text-brand-700 shadow-xs';
-    tabLogin.className = 'py-2 text-xs font-bold rounded-xl transition text-slate-500 hover:text-slate-900';
-    signupForm.classList.remove('hidden');
-    loginForm.classList.add('hidden');
+    if (tabsNav) tabsNav.classList.remove('hidden');
+    if (tabLogin) tabLogin.className = 'py-2 text-xs font-bold rounded-xl transition bg-white dark:bg-slate-900 text-brand-700 dark:text-brand-400 shadow-xs';
+    if (tabSignup) tabSignup.className = 'py-2 text-xs font-bold rounded-xl transition text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white';
+    if (titleEl) titleEl.innerText = 'Welcome to Spillter';
+    if (subtitleEl) subtitleEl.innerText = 'Travel expense tracking & group settlement made effortless';
+    if (loginForm) loginForm.classList.remove('hidden');
+    if (signupForm) signupForm.classList.add('hidden');
+    if (forgotForm) forgotForm.classList.add('hidden');
+  } else if (tab === 'signup') {
+    if (tabsNav) tabsNav.classList.remove('hidden');
+    if (tabSignup) tabSignup.className = 'py-2 text-xs font-bold rounded-xl transition bg-white dark:bg-slate-900 text-brand-700 dark:text-brand-400 shadow-xs';
+    if (tabLogin) tabLogin.className = 'py-2 text-xs font-bold rounded-xl transition text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white';
+    if (titleEl) titleEl.innerText = 'Create an Account';
+    if (subtitleEl) subtitleEl.innerText = 'Join Spillter to track expenses, scan bills, and split trips';
+    if (signupForm) signupForm.classList.remove('hidden');
+    if (loginForm) loginForm.classList.add('hidden');
+    if (forgotForm) forgotForm.classList.add('hidden');
+  } else if (tab === 'forgot') {
+    if (tabsNav) tabsNav.classList.add('hidden');
+    if (titleEl) titleEl.innerText = 'Reset Password';
+    if (subtitleEl) subtitleEl.innerText = 'Enter your email and choose a new password';
+    if (loginForm) loginForm.classList.add('hidden');
+    if (signupForm) signupForm.classList.add('hidden');
+    if (forgotForm) {
+      forgotForm.classList.remove('hidden');
+      const currentEmail = document.getElementById('loginEmail')?.value.trim();
+      const resetEmailInp = document.getElementById('resetEmail');
+      if (resetEmailInp && currentEmail) {
+        resetEmailInp.value = currentEmail;
+      }
+    }
   }
+  lucide.createIcons();
 }
 
 function showAuthAlert(msg) {
@@ -241,29 +283,58 @@ async function handleSignupSubmit(e) {
   }
 }
 
-async function quickDemoLogin() {
-  document.getElementById('loginEmail').value = 'nisarg@travel.com';
-  document.getElementById('loginPassword').value = 'password123';
+async function handleResetPasswordSubmit(e) {
+  e.preventDefault();
+  const email = document.getElementById('resetEmail').value.trim();
+  const newPassword = document.getElementById('resetNewPassword').value;
+  const confirmPassword = document.getElementById('resetConfirmPassword').value;
+
+  if (newPassword.length < 4) {
+    showAuthAlert('Password must be at least 4 characters long');
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    showAuthAlert('Passwords do not match. Please re-type your confirm password.');
+    return;
+  }
+
+  const submitBtn = document.getElementById('resetSubmitBtn');
+  const originalBtnHtml = submitBtn ? submitBtn.innerHTML : '';
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.innerText = 'Updating Password...';
+  }
+
   try {
-    const res = await fetch('/api/auth/login', {
+    const res = await fetch('/api/auth/reset-password', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'nisarg@travel.com', password: 'password123' })
+      body: JSON.stringify({ email, new_password: newPassword })
     });
+
     const data = await res.json();
     if (res.ok) {
       localStorage.setItem('spillter_token', data.token);
       currentUser = data.user;
       updateUserUI(currentUser);
       closeModal('authModal');
-      showToast(`Logged in as demo traveler Nisarg! 🏖️`);
+      showToast('Password updated successfully! Welcome back! 🎉');
+      document.getElementById('forgotPasswordForm').reset();
+      switchAuthTab('login');
       await loadTrips();
     } else {
-      showAuthAlert(data.detail || 'Demo login failed');
+      showAuthAlert(data.detail || 'Failed to reset password');
     }
   } catch (err) {
     console.error(err);
-    showAuthAlert('Error during demo login');
+    showAuthAlert('Unable to connect to server. Please try again.');
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = originalBtnHtml;
+      lucide.createIcons();
+    }
   }
 }
 
