@@ -129,9 +129,11 @@ def get_db_connection():
             print(f"Warning: Turso connection failed ({e}), falling back to local SQLite.")
     
     # Standard SQLite connection
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=60.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 60000")
     return conn
 
 def init_db():
@@ -230,7 +232,7 @@ def init_db():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS trip_vehicles (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        trip_id INTEGER UNIQUE NOT NULL,
+        trip_id INTEGER NOT NULL,
         vehicle_type TEXT NOT NULL DEFAULT 'Car',
         brand_model TEXT NOT NULL,
         fuel_type TEXT NOT NULL DEFAULT 'CNG',
@@ -265,6 +267,28 @@ def init_db():
     )
     """)
 
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS trip_categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        trip_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        icon TEXT DEFAULT '🏷️',
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (trip_id) REFERENCES trips (id) ON DELETE CASCADE
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS trip_payment_modes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        trip_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        icon TEXT DEFAULT '💳',
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (trip_id) REFERENCES trips (id) ON DELETE CASCADE
+    )
+    """)
+
     # Migrate existing tables if missing new columns
     cursor.execute("PRAGMA table_info(expenses)")
     columns = [col[1] for col in cursor.fetchall()]
@@ -275,6 +299,33 @@ def init_db():
     trip_columns = [col[1] for col in cursor.fetchall()]
     if "user_id" not in trip_columns:
         cursor.execute("ALTER TABLE trips ADD COLUMN user_id INTEGER REFERENCES users(id)")
+
+    # Migration for trip_vehicles unique constraint removal (support multiple vehicles per trip)
+    try:
+        cursor.execute("PRAGMA index_list('trip_vehicles')")
+        idx_rows = cursor.fetchall()
+        has_unique_trip_id = False
+        for idx in idx_rows:
+            is_unique = idx[2] if isinstance(idx, (tuple, list)) else idx.get("unique", 0)
+            idx_name = idx[1] if isinstance(idx, (tuple, list)) else idx.get("name", "")
+            if is_unique:
+                cursor.execute(f"PRAGMA index_info('{idx_name}')")
+                info = cursor.fetchall()
+                for col in info:
+                    col_name = col[2] if isinstance(col, (tuple, list)) else col.get("name", "")
+                    if col_name == "trip_id":
+                        has_unique_trip_id = True
+                        break
+        if has_unique_trip_id:
+            cursor.execute("PRAGMA foreign_keys = OFF")
+            cursor.execute("DROP TABLE IF EXISTS trip_vehicles_new")
+            cursor.execute("CREATE TABLE trip_vehicles_new (id INTEGER PRIMARY KEY AUTOINCREMENT, trip_id INTEGER NOT NULL, vehicle_type TEXT NOT NULL DEFAULT 'Car', brand_model TEXT NOT NULL, fuel_type TEXT NOT NULL DEFAULT 'CNG', benchmark_mileage REAL DEFAULT 0.0, initial_odometer REAL DEFAULT 0.0, created_at TEXT NOT NULL, FOREIGN KEY (trip_id) REFERENCES trips (id) ON DELETE CASCADE)")
+            cursor.execute("INSERT INTO trip_vehicles_new SELECT * FROM trip_vehicles")
+            cursor.execute("DROP TABLE trip_vehicles")
+            cursor.execute("ALTER TABLE trip_vehicles_new RENAME TO trip_vehicles")
+            cursor.execute("PRAGMA foreign_keys = ON")
+    except Exception as e:
+        cursor.execute("PRAGMA foreign_keys = ON")
 
     # Clean up any legacy demo data for clean and accurate user-only database
     try:
@@ -302,6 +353,108 @@ def init_db():
 
     conn.commit()
     conn.close()
+
+DEFAULT_CATEGORIES = [
+    {"name": "Food & Dining", "icon": "🍽️"},
+    {"name": "Stay & Accommodation", "icon": "🏨"},
+    {"name": "Travel & Transport", "icon": "🚗"},
+    {"name": "Activities & Adventure", "icon": "🏄"},
+    {"name": "Sightseeing & Tickets", "icon": "📸"},
+    {"name": "Shopping & Souvenirs", "icon": "🛍️"},
+    {"name": "Miscellaneous", "icon": "📦"}
+]
+
+DEFAULT_PAYMENT_MODES = [
+    {"name": "UPI / QR", "icon": "📱"},
+    {"name": "Cash", "icon": "💵"},
+    {"name": "Credit Card", "icon": "💳"},
+    {"name": "Debit Card", "icon": "💳"},
+    {"name": "Net Banking", "icon": "🏦"}
+]
+
+def get_trip_categories(trip_id: int) -> List[Dict[str, Any]]:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, trip_id, name, icon FROM trip_categories WHERE trip_id = ? ORDER BY id ASC", (trip_id,))
+    rows = cursor.fetchall()
+    if not rows:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for cat in DEFAULT_CATEGORIES:
+            cursor.execute(
+                "INSERT INTO trip_categories (trip_id, name, icon, created_at) VALUES (?, ?, ?, ?)",
+                (trip_id, cat["name"], cat["icon"], now)
+            )
+        conn.commit()
+        cursor.execute("SELECT id, trip_id, name, icon FROM trip_categories WHERE trip_id = ? ORDER BY id ASC", (trip_id,))
+        rows = cursor.fetchall()
+    categories = [dict(r) for r in rows]
+    conn.close()
+    return categories
+
+def add_trip_category(trip_id: int, name: str, icon: str = "🏷️") -> Dict[str, Any]:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute(
+        "INSERT INTO trip_categories (trip_id, name, icon, created_at) VALUES (?, ?, ?, ?)",
+        (trip_id, name.strip(), icon.strip() if icon else "🏷️", now)
+    )
+    cat_id = cursor.lastrowid
+    conn.commit()
+    cursor.execute("SELECT id, trip_id, name, icon FROM trip_categories WHERE id = ?", (cat_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row)
+
+def delete_trip_category(trip_id: int, category_id: int) -> bool:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM trip_categories WHERE id = ? AND trip_id = ?", (category_id, trip_id))
+    conn.commit()
+    conn.close()
+    return True
+
+def get_trip_payment_modes(trip_id: int) -> List[Dict[str, Any]]:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, trip_id, name, icon FROM trip_payment_modes WHERE trip_id = ? ORDER BY id ASC", (trip_id,))
+    rows = cursor.fetchall()
+    if not rows:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for mode in DEFAULT_PAYMENT_MODES:
+            cursor.execute(
+                "INSERT INTO trip_payment_modes (trip_id, name, icon, created_at) VALUES (?, ?, ?, ?)",
+                (trip_id, mode["name"], mode["icon"], now)
+            )
+        conn.commit()
+        cursor.execute("SELECT id, trip_id, name, icon FROM trip_payment_modes WHERE trip_id = ? ORDER BY id ASC", (trip_id,))
+        rows = cursor.fetchall()
+    modes = [dict(r) for r in rows]
+    conn.close()
+    return modes
+
+def add_trip_payment_mode(trip_id: int, name: str, icon: str = "💳") -> Dict[str, Any]:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute(
+        "INSERT INTO trip_payment_modes (trip_id, name, icon, created_at) VALUES (?, ?, ?, ?)",
+        (trip_id, name.strip(), icon.strip() if icon else "💳", now)
+    )
+    mode_id = cursor.lastrowid
+    conn.commit()
+    cursor.execute("SELECT id, trip_id, name, icon FROM trip_payment_modes WHERE id = ?", (mode_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row)
+
+def delete_trip_payment_mode(trip_id: int, mode_id: int) -> bool:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM trip_payment_modes WHERE id = ? AND trip_id = ?", (mode_id, trip_id))
+    conn.commit()
+    conn.close()
+    return True
 
 if __name__ == "__main__":
     init_db()

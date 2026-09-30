@@ -3,6 +3,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
+from datetime import datetime
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.database import init_db, get_db_connection
@@ -487,6 +488,139 @@ def test_member_pdf_export():
     assert pdf_res2.headers["content-type"] == "application/pdf"
     assert len(pdf_res2.content) > 1000
 
+def test_settings_and_multi_vehicle_features():
+    # 1. Signup user & get token
+    email = f"settings_test_{int(datetime.now().timestamp())}@example.com"
+    su_res = client.post("/api/auth/signup", json={
+        "name": "Alex Mercer",
+        "email": email,
+        "mobile": "9988776655",
+        "password": "initial_password_123"
+    })
+    assert su_res.status_code == 200
+    token = su_res.json()["token"]
+    auth_header = {"Authorization": f"Bearer {token}"}
+
+    # 2. Update profile
+    p_res = client.put("/api/auth/profile", json={"name": "Alexander Mercer", "mobile": "9988776600"}, headers=auth_header)
+    assert p_res.status_code == 200
+    assert p_res.json()["user"]["name"] == "Alexander Mercer"
+    assert p_res.json()["user"]["mobile"] == "9988776600"
+
+    # 3. Change password
+    # 3a. Invalid current password
+    bad_pw = client.post("/api/auth/change-password", json={
+        "current_password": "wrong_password",
+        "new_password": "new_secure_password_456"
+    }, headers=auth_header)
+    assert bad_pw.status_code == 400
+
+    # 3b. Correct password change
+    ok_pw = client.post("/api/auth/change-password", json={
+        "current_password": "initial_password_123",
+        "new_password": "new_secure_password_456"
+    }, headers=auth_header)
+    assert ok_pw.status_code == 200
+
+    # 3c. Login with new password
+    login_new = client.post("/api/auth/login", json={"email": email, "password": "new_secure_password_456"})
+    assert login_new.status_code == 200
+
+    # 4. Create trip for vehicle and category testing
+    t_res = client.post("/api/trips", json={"name": "Multi-Vehicle Road Trip", "currency": "₹"}, headers=auth_header)
+    assert t_res.status_code == 200
+    trip_id = t_res.json()["id"]
+
+    # 5. Test categories
+    cats_res = client.get(f"/api/trips/{trip_id}/categories")
+    assert cats_res.status_code == 200
+    cats = cats_res.json()["categories"]
+    assert len(cats) >= 7 # Default categories initialized
+
+    # Add custom category
+    add_cat = client.post(f"/api/trips/{trip_id}/categories", json={"name": "Nightlife & Pubs", "icon": "🍸"})
+    assert add_cat.status_code == 200
+    cat_id = add_cat.json()["id"]
+    assert add_cat.json()["name"] == "Nightlife & Pubs"
+
+    # Delete custom category
+    del_cat = client.delete(f"/api/trips/{trip_id}/categories/{cat_id}")
+    assert del_cat.status_code == 200
+
+    # 6. Test payment modes
+    modes_res = client.get(f"/api/trips/{trip_id}/payment-modes")
+    assert modes_res.status_code == 200
+    modes = modes_res.json()["payment_modes"]
+    assert len(modes) >= 5 # Default payment modes initialized
+
+    # Add custom payment mode
+    add_mode = client.post(f"/api/trips/{trip_id}/payment-modes", json={"name": "Forex Card", "icon": "💳"})
+    assert add_mode.status_code == 200
+    mode_id = add_mode.json()["id"]
+
+    # Delete payment mode
+    del_mode = client.delete(f"/api/trips/{trip_id}/payment-modes/{mode_id}")
+    assert del_mode.status_code == 200
+
+    # 7. Test Multi-Vehicle Management
+    # 7a. Get vehicles (initializes default Ertiga)
+    v_list = client.get(f"/api/trips/{trip_id}/vehicles").json()["vehicles"]
+    assert len(v_list) == 1
+    v1_id = v_list[0]["id"]
+
+    # 7b. Add second vehicle: Hyundai Creta (Petrol)
+    add_v2 = client.post(f"/api/trips/{trip_id}/vehicles", json={
+        "vehicle_type": "SUV",
+        "brand_model": "Hyundai Creta",
+        "fuel_type": "Petrol",
+        "benchmark_mileage": 17.0,
+        "initial_odometer": 25000.0
+    })
+    assert add_v2.status_code == 200
+    v2_id = add_v2.json()["id"]
+
+    # 7c. Add third vehicle: Royal Enfield Hunter 350 (Bike)
+    add_v3 = client.post(f"/api/trips/{trip_id}/vehicles", json={
+        "vehicle_type": "Bike",
+        "brand_model": "Royal Enfield Hunter 350",
+        "fuel_type": "Petrol",
+        "benchmark_mileage": 36.2,
+        "initial_odometer": 5000.0
+    })
+    assert add_v3.status_code == 200
+    v3_id = add_v3.json()["id"]
+
+    # 7d. Verify all 3 vehicles exist
+    all_v = client.get(f"/api/trips/{trip_id}/vehicles").json()["vehicles"]
+    assert len(all_v) == 3
+
+    # 7e. Log fuel for vehicle 2 (Creta)
+    m1 = client.post(f"/api/trips/{trip_id}/members", json={"name": "Alex"}).json()["id"]
+    f_v2 = client.post(f"/api/trips/{trip_id}/fuel-logs", json={
+        "date": "2026-09-04",
+        "vehicle_id": v2_id,
+        "odometer_reading": 25300.0,
+        "distance_run": 300.0,
+        "fuel_amount": 2000.0,
+        "fuel_quantity": 20.0,
+        "fuel_price_per_unit": 100.0,
+        "is_full_tank": True,
+        "payer_id": m1
+    })
+    assert f_v2.status_code == 200
+
+    # 7f. Check mileage summary contains fleet + per-vehicle data
+    sum_res = client.get(f"/api/trips/{trip_id}/mileage-summary").json()
+    assert sum_res["vehicles_count"] == 3
+    assert len(sum_res["vehicles"]) == 3
+    assert sum_res["total_fuel_cost"] == 2000.0
+
+    # 7g. Delete third vehicle
+    del_v3 = client.delete(f"/api/trips/{trip_id}/vehicles/{v3_id}")
+    assert del_v3.status_code == 200
+    remaining_v = client.get(f"/api/trips/{trip_id}/vehicles").json()["vehicles"]
+    assert len(remaining_v) == 2
+
 if __name__ == "__main__":
     init_db()
     test_root()
@@ -498,7 +632,9 @@ if __name__ == "__main__":
     test_auth_flow()
     test_payment_mode_in_expenses()
     test_receipt_parsing()
+    test_settings_and_multi_vehicle_features()
     from backend.test_mileage import test_mileage_catalog, test_ertiga_cng_trip_mileage
     test_mileage_catalog()
     test_ertiga_cng_trip_mileage()
     print("ALL TEST CASES PASSED SUCCESSFULLY!")
+

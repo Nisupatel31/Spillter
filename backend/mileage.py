@@ -274,70 +274,126 @@ def get_default_benchmark(vehicle_type: str, model_name: str, fuel_type: str) ->
     return 18.0 if vehicle_type == "Car" else 45.0
 
 
-def get_trip_vehicle(trip_id: int) -> Optional[Dict[str, Any]]:
-    """Retrieve vehicle details configured for this trip."""
+def get_trip_vehicles(trip_id: int) -> List[Dict[str, Any]]:
+    """Retrieve all vehicles configured for this trip."""
     conn = get_db_connection()
-    row = conn.execute("SELECT * FROM trip_vehicles WHERE trip_id = ?", (trip_id,)).fetchone()
+    rows = conn.execute("SELECT * FROM trip_vehicles WHERE trip_id = ? ORDER BY id ASC", (trip_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_trip_vehicle(trip_id: int, vehicle_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    """Retrieve a vehicle details configured for this trip (by ID or first vehicle)."""
+    conn = get_db_connection()
+    if vehicle_id:
+        row = conn.execute("SELECT * FROM trip_vehicles WHERE trip_id = ? AND id = ?", (trip_id, vehicle_id)).fetchone()
+    else:
+        row = conn.execute("SELECT * FROM trip_vehicles WHERE trip_id = ? ORDER BY id ASC LIMIT 1", (trip_id,)).fetchone()
     conn.close()
     if row:
         return dict(row)
     return None
 
 
-def set_trip_vehicle(trip_id: int, vehicle_type: str, brand_model: str, fuel_type: str,
+def add_trip_vehicle(trip_id: int, vehicle_type: str, brand_model: str, fuel_type: str,
                      benchmark_mileage: float, initial_odometer: float) -> Dict[str, Any]:
-    """Create or update vehicle settings for a trip."""
+    """Add a new vehicle to this trip."""
     conn = get_db_connection()
     cursor = conn.cursor()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    existing = cursor.execute("SELECT id FROM trip_vehicles WHERE trip_id = ?", (trip_id,)).fetchone()
-    if existing:
-        cursor.execute("""
-        UPDATE trip_vehicles
-        SET vehicle_type = ?, brand_model = ?, fuel_type = ?, benchmark_mileage = ?, initial_odometer = ?
-        WHERE trip_id = ?
-        """, (vehicle_type, brand_model, fuel_type, benchmark_mileage, initial_odometer, trip_id))
-        v_id = existing["id"]
-    else:
-        cursor.execute("""
-        INSERT INTO trip_vehicles (trip_id, vehicle_type, brand_model, fuel_type, benchmark_mileage, initial_odometer, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (trip_id, vehicle_type, brand_model, fuel_type, benchmark_mileage, initial_odometer, now))
-        v_id = cursor.lastrowid
-
+    cursor.execute("""
+    INSERT INTO trip_vehicles (trip_id, vehicle_type, brand_model, fuel_type, benchmark_mileage, initial_odometer, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (trip_id, vehicle_type, brand_model, fuel_type, benchmark_mileage, initial_odometer, now))
+    v_id = cursor.lastrowid
     conn.commit()
+
     row = cursor.execute("SELECT * FROM trip_vehicles WHERE id = ?", (v_id,)).fetchone()
     conn.close()
     return dict(row)
 
 
-def get_fuel_logs(trip_id: int) -> List[Dict[str, Any]]:
+def update_trip_vehicle(trip_id: int, vehicle_id: int, vehicle_type: str, brand_model: str,
+                        fuel_type: str, benchmark_mileage: float, initial_odometer: float) -> Optional[Dict[str, Any]]:
+    """Update an existing vehicle's configuration."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    UPDATE trip_vehicles
+    SET vehicle_type = ?, brand_model = ?, fuel_type = ?, benchmark_mileage = ?, initial_odometer = ?
+    WHERE id = ? AND trip_id = ?
+    """, (vehicle_type, brand_model, fuel_type, benchmark_mileage, initial_odometer, vehicle_id, trip_id))
+    conn.commit()
+    row = cursor.execute("SELECT * FROM trip_vehicles WHERE id = ? AND trip_id = ?", (vehicle_id, trip_id)).fetchone()
+    conn.close()
+    if row:
+        return dict(row)
+    return None
+
+
+def delete_trip_vehicle(trip_id: int, vehicle_id: int) -> bool:
+    """Delete a vehicle from this trip."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM trip_vehicles WHERE id = ? AND trip_id = ?", (vehicle_id, trip_id))
+    conn.commit()
+    conn.close()
+    return True
+
+
+def set_trip_vehicle(trip_id: int, vehicle_type: str, brand_model: str, fuel_type: str,
+                     benchmark_mileage: float, initial_odometer: float) -> Dict[str, Any]:
+    """Backward-compatible helper: Create or update first vehicle settings for a trip."""
+    existing = get_trip_vehicle(trip_id)
+    if existing:
+        return update_trip_vehicle(trip_id, existing["id"], vehicle_type, brand_model, fuel_type, benchmark_mileage, initial_odometer)
+    return add_trip_vehicle(trip_id, vehicle_type, brand_model, fuel_type, benchmark_mileage, initial_odometer)
+
+
+def get_fuel_logs(trip_id: int, vehicle_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """
-    Get all fuel logs for a trip with calculated segment distances and segment mileage.
+    Get all fuel logs for a trip with calculated segment distances and segment mileage per vehicle.
     """
     conn = get_db_connection()
-    v_row = conn.execute("SELECT * FROM trip_vehicles WHERE trip_id = ?", (trip_id,)).fetchone()
-    initial_odo = v_row["initial_odometer"] if v_row else 0.0
-    fuel_unit = "km/kg" if (v_row and v_row["fuel_type"] == "CNG") else "km/L"
+    vehicles = {v["id"]: dict(v) for v in conn.execute("SELECT * FROM trip_vehicles WHERE trip_id = ?", (trip_id,)).fetchall()}
 
-    logs = conn.execute("""
-    SELECT f.*, m.name as payer_name, m.avatar_color as payer_color
+    query = """
+    SELECT f.*, m.name as payer_name, m.avatar_color as payer_color,
+           v.brand_model as vehicle_brand_model, v.vehicle_type as vehicle_kind, v.fuel_type as vehicle_fuel
     FROM fuel_logs f
     LEFT JOIN members m ON f.payer_id = m.id
+    LEFT JOIN trip_vehicles v ON f.vehicle_id = v.id
     WHERE f.trip_id = ?
-    ORDER BY f.odometer_reading ASC, f.date ASC, f.id ASC
-    """, (trip_id,)).fetchall()
+    """
+    params = [trip_id]
+    if vehicle_id:
+        query += " AND f.vehicle_id = ?"
+        params.append(vehicle_id)
+    query += " ORDER BY f.odometer_reading ASC, f.date ASC, f.id ASC"
+
+    logs = conn.execute(query, tuple(params)).fetchall()
     conn.close()
 
-    results = []
-    prev_odo = initial_odo
+    # Track previous odometer per vehicle
+    prev_odos: Dict[Optional[int], float] = {}
+    for vid, v in vehicles.items():
+        prev_odos[vid] = v.get("initial_odometer") or 0.0
+    prev_odos[None] = 0.0
 
+    results = []
     for log in logs:
         item = dict(log)
-        odo = item["odometer_reading"]
+        vid = item.get("vehicle_id")
+        v = vehicles.get(vid)
 
-        # Calculate distance run since previous fill
+        fuel_type = (v["fuel_type"] if v else item.get("fuel_type")) or "Petrol"
+        fuel_unit = "km/kg" if fuel_type == "CNG" else "km/L"
+
+        odo = item["odometer_reading"]
+        prev_odo = prev_odos.get(vid, 0.0)
+
+        # Distance run since previous fill for this specific vehicle
         dist = max(0.0, odo - prev_odo)
         item["calculated_segment_distance"] = round(dist, 1)
 
@@ -353,105 +409,174 @@ def get_fuel_logs(trip_id: int) -> List[Dict[str, Any]]:
 
         item["mileage_unit"] = fuel_unit
         results.append(item)
-        prev_odo = odo
+        prev_odos[vid] = odo
 
     return results
 
 
-def calculate_trip_mileage_summary(trip_id: int) -> Dict[str, Any]:
+def calculate_trip_mileage_summary(trip_id: int, vehicle_id: Optional[int] = None) -> Dict[str, Any]:
     """
-    Calculate comprehensive trip mileage, total distance run, fuel consumption,
-    average kmpl or km/kg, running cost per km, and comparison against benchmark.
+    Calculate comprehensive trip mileage for multi-vehicle fleets:
+    - Overall fleet metrics (combined distance, total fuel cost)
+    - Per-vehicle metrics array (individual mileage, benchmarks, and efficiency)
+    - Backward-compatible top-level keys for UI elements
     """
     conn = get_db_connection()
-    v_row = conn.execute("SELECT * FROM trip_vehicles WHERE trip_id = ?", (trip_id,)).fetchone()
-    logs = conn.execute("""
-    SELECT * FROM fuel_logs
-    WHERE trip_id = ?
-    ORDER BY odometer_reading ASC, date ASC, id ASC
+    v_rows = conn.execute("SELECT * FROM trip_vehicles WHERE trip_id = ? ORDER BY id ASC", (trip_id,)).fetchall()
+    logs_raw = conn.execute("""
+    SELECT f.*, v.fuel_type as vehicle_fuel
+    FROM fuel_logs f
+    LEFT JOIN trip_vehicles v ON f.vehicle_id = v.id
+    WHERE f.trip_id = ?
+    ORDER BY f.odometer_reading ASC, f.date ASC, f.id ASC
     """, (trip_id,)).fetchall()
     members_count = conn.execute("SELECT COUNT(*) FROM members WHERE trip_id = ?", (trip_id,)).fetchone()[0] or 1
     conn.close()
 
-    vehicle = dict(v_row) if v_row else {
-        "vehicle_type": "Car",
-        "brand_model": "Maruti Suzuki Ertiga",
-        "fuel_type": "CNG",
-        "benchmark_mileage": 26.11,
-        "initial_odometer": 0.0
-    }
+    vehicles_list = [dict(r) for r in v_rows]
+    logs = [dict(l) for l in logs_raw]
 
-    fuel_type = vehicle["fuel_type"]
-    is_cng = (fuel_type == "CNG")
-    quantity_unit = "kg" if is_cng else "L"
-    mileage_unit = "km/kg" if is_cng else "km/L"
-    benchmark = vehicle.get("benchmark_mileage") or 20.0
-    initial_odo = vehicle.get("initial_odometer") or 0.0
+    # Map logs by vehicle
+    vehicle_logs_map: Dict[Optional[int], List[Dict[str, Any]]] = {}
+    for l in logs:
+        vid = l.get("vehicle_id")
+        vehicle_logs_map.setdefault(vid, []).append(l)
 
-    if not logs:
-        return {
-            "vehicle": vehicle,
+    # Calculate per-vehicle summaries
+    vehicles_summaries = []
+    total_fleet_distance = 0.0
+    total_fleet_fuel_cost = sum(l["fuel_amount"] for l in logs)
+    total_fleet_fuel_qty = sum(l["fuel_quantity"] for l in logs)
+
+    for v in vehicles_list:
+        vid = v["id"]
+        v_logs = vehicle_logs_map.get(vid, [])
+        initial_odo = v.get("initial_odometer") or 0.0
+        benchmark = v.get("benchmark_mileage") or 20.0
+        fuel_type = v.get("fuel_type") or "Petrol"
+        is_cng = (fuel_type == "CNG")
+        qty_unit = "kg" if is_cng else "L"
+        m_unit = "km/kg" if is_cng else "km/L"
+
+        if not v_logs:
+            v_summary = {
+                "vehicle": v,
+                "total_distance_km": 0.0,
+                "total_fuel_quantity": 0.0,
+                "quantity_unit": qty_unit,
+                "mileage_unit": m_unit,
+                "total_fuel_cost": 0.0,
+                "average_mileage": 0.0,
+                "benchmark_mileage": benchmark,
+                "efficiency_percentage": 0.0,
+                "efficiency_label": "No fuel logs yet",
+                "cost_per_km": 0.0,
+                "fuel_logs_count": 0,
+                "latest_odometer": initial_odo,
+                "initial_odometer": initial_odo
+            }
+        else:
+            v_fuel_qty = sum(l["fuel_quantity"] for l in v_logs)
+            v_fuel_cost = sum(l["fuel_amount"] for l in v_logs)
+            latest_odo = max(l["odometer_reading"] for l in v_logs)
+            v_dist = max(0.0, latest_odo - initial_odo)
+            if v_dist <= 0.0 and len(v_logs) > 0:
+                v_dist = sum(l["distance_run"] for l in v_logs if l["distance_run"] > 0)
+
+            total_fleet_distance += v_dist
+
+            v_avg_mileage = round(v_dist / v_fuel_qty, 2) if v_fuel_qty > 0 and v_dist > 0 else 0.0
+            v_cost_per_km = round(v_fuel_cost / v_dist, 2) if v_dist > 0 else 0.0
+
+            if benchmark > 0 and v_avg_mileage > 0:
+                eff_pct = round((v_avg_mileage / benchmark) * 100, 1)
+                if eff_pct >= 95:
+                    eff_lbl = "🌟 Outstanding (Near or exceeds ARAI benchmark)"
+                elif eff_pct >= 85:
+                    eff_lbl = "✅ High Highway Efficiency (Great performance)"
+                elif eff_pct >= 70:
+                    eff_lbl = "👍 Normal Real-World Driving (Mixed traffic)"
+                else:
+                    eff_lbl = "⚠️ Heavy Load / City Traffic / Hills"
+            else:
+                eff_pct = 0.0
+                eff_lbl = "Log fuel & distance to see efficiency"
+
+            v_summary = {
+                "vehicle": v,
+                "total_distance_km": round(v_dist, 1),
+                "total_fuel_quantity": round(v_fuel_qty, 2),
+                "quantity_unit": qty_unit,
+                "mileage_unit": m_unit,
+                "total_fuel_cost": round(v_fuel_cost, 2),
+                "average_mileage": v_avg_mileage,
+                "benchmark_mileage": round(benchmark, 2),
+                "efficiency_percentage": eff_pct,
+                "efficiency_label": eff_lbl,
+                "cost_per_km": v_cost_per_km,
+                "fuel_logs_count": len(v_logs),
+                "latest_odometer": round(latest_odo, 1),
+                "initial_odometer": round(initial_odo, 1)
+            }
+        vehicles_summaries.append(v_summary)
+
+    # Primary vehicle (or selected vehicle)
+    primary_summary = None
+    if vehicle_id:
+        for s in vehicles_summaries:
+            if s["vehicle"]["id"] == vehicle_id:
+                primary_summary = s
+                break
+    if not primary_summary and vehicles_summaries:
+        primary_summary = vehicles_summaries[0]
+
+    # Default fallback vehicle if trip has no vehicle configured yet
+    if not primary_summary:
+        default_v = {
+            "id": None,
+            "vehicle_type": "Car",
+            "brand_model": "Maruti Suzuki Ertiga",
+            "fuel_type": "CNG",
+            "benchmark_mileage": 26.11,
+            "initial_odometer": 0.0
+        }
+        primary_summary = {
+            "vehicle": default_v,
             "total_distance_km": 0.0,
             "total_fuel_quantity": 0.0,
-            "quantity_unit": quantity_unit,
-            "mileage_unit": mileage_unit,
+            "quantity_unit": "kg",
+            "mileage_unit": "km/kg",
             "total_fuel_cost": 0.0,
             "average_mileage": 0.0,
-            "benchmark_mileage": benchmark,
+            "benchmark_mileage": 26.11,
             "efficiency_percentage": 0.0,
-            "efficiency_label": "No fuel logs yet",
+            "efficiency_label": "No vehicle configured yet",
             "cost_per_km": 0.0,
-            "cost_per_person_km": 0.0,
             "fuel_logs_count": 0,
-            "latest_odometer": initial_odo,
-            "initial_odometer": initial_odo
+            "latest_odometer": 0.0,
+            "initial_odometer": 0.0
         }
 
-    total_fuel_qty = sum(l["fuel_quantity"] for l in logs)
-    total_fuel_cost = sum(l["fuel_amount"] for l in logs)
-    latest_odo = max(l["odometer_reading"] for l in logs)
-    total_distance = max(0.0, latest_odo - initial_odo)
+    fleet_cost_per_km = round(total_fleet_fuel_cost / total_fleet_distance, 2) if total_fleet_distance > 0 else 0.0
+    cost_per_person_km = round(fleet_cost_per_km / members_count, 2) if members_count > 0 else fleet_cost_per_km
 
-    # If initial odometer was not set or matches latest, fallback to summing recorded segment distances
-    if total_distance <= 0.0 and len(logs) > 0:
-        total_distance = sum(l["distance_run"] for l in logs if l["distance_run"] > 0)
-
-    # Average mileage
-    avg_mileage = round(total_distance / total_fuel_qty, 2) if total_fuel_qty > 0 and total_distance > 0 else 0.0
-
-    # Cost per km
-    cost_per_km = round(total_fuel_cost / total_distance, 2) if total_distance > 0 else 0.0
-    cost_per_person_km = round(cost_per_km / members_count, 2) if members_count > 0 else cost_per_km
-
-    # Efficiency vs Benchmark
-    if benchmark > 0 and avg_mileage > 0:
-        efficiency_pct = round((avg_mileage / benchmark) * 100, 1)
-        if efficiency_pct >= 95:
-            eff_label = "🌟 Outstanding (Near or exceeds ARAI benchmark)"
-        elif efficiency_pct >= 85:
-            eff_label = "✅ High Highway Efficiency (Great performance)"
-        elif efficiency_pct >= 70:
-            eff_label = "👍 Normal Real-World Driving (Mixed traffic)"
-        else:
-            eff_label = "⚠️ Heavy Load / City Traffic / Hills"
-    else:
-        efficiency_pct = 0.0
-        eff_label = "Log fuel & distance to see efficiency"
-
+    # Combine fleet overview and top-level backward-compatible keys
     return {
-        "vehicle": vehicle,
-        "total_distance_km": round(total_distance, 1),
-        "total_fuel_quantity": round(total_fuel_qty, 2),
-        "quantity_unit": quantity_unit,
-        "mileage_unit": mileage_unit,
-        "total_fuel_cost": round(total_fuel_cost, 2),
-        "average_mileage": avg_mileage,
-        "benchmark_mileage": round(benchmark, 2),
-        "efficiency_percentage": efficiency_pct,
-        "efficiency_label": eff_label,
-        "cost_per_km": cost_per_km,
+        "vehicle": primary_summary["vehicle"],
+        "vehicles": vehicles_summaries,
+        "vehicles_count": len(vehicles_summaries),
+        "total_distance_km": round(total_fleet_distance, 1),
+        "total_fuel_quantity": round(total_fleet_fuel_qty, 2),
+        "quantity_unit": primary_summary["quantity_unit"],
+        "mileage_unit": primary_summary["mileage_unit"],
+        "total_fuel_cost": round(total_fleet_fuel_cost, 2),
+        "average_mileage": primary_summary["average_mileage"],
+        "benchmark_mileage": primary_summary["benchmark_mileage"],
+        "efficiency_percentage": primary_summary["efficiency_percentage"],
+        "efficiency_label": primary_summary["efficiency_label"],
+        "cost_per_km": fleet_cost_per_km if total_fleet_distance > 0 else primary_summary["cost_per_km"],
         "cost_per_person_km": cost_per_person_km,
         "fuel_logs_count": len(logs),
-        "latest_odometer": round(latest_odo, 1),
-        "initial_odometer": round(initial_odo, 1)
+        "latest_odometer": primary_summary["latest_odometer"],
+        "initial_odometer": primary_summary["initial_odometer"]
     }

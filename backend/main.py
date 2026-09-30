@@ -8,13 +8,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 import secrets
-from backend.database import get_db_connection, init_db, hash_password, verify_password
+from backend.database import (
+    get_db_connection, init_db, hash_password, verify_password,
+    get_trip_categories, add_trip_category, delete_trip_category,
+    get_trip_payment_modes, add_trip_payment_mode, delete_trip_payment_mode
+)
 from backend.settlement import calculate_trip_settlement
 from backend.reports import generate_trip_pdf, generate_trip_excel, generate_member_pdf
 from backend.receipt_parser import parse_receipt_text
 from backend.mileage import (
     get_vehicle_catalogs,
     get_trip_vehicle,
+    get_trip_vehicles,
+    add_trip_vehicle,
+    update_trip_vehicle,
+    delete_trip_vehicle,
     set_trip_vehicle,
     get_fuel_logs,
     calculate_trip_mileage_summary,
@@ -51,6 +59,22 @@ class UserLogin(BaseModel):
 class ResetPasswordRequest(BaseModel):
     email: str
     new_password: str
+
+class UserProfileUpdate(BaseModel):
+    name: str
+    mobile: Optional[str] = ""
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+class CategoryCreate(BaseModel):
+    name: str
+    icon: Optional[str] = "🏷️"
+
+class PaymentModeCreate(BaseModel):
+    name: str
+    icon: Optional[str] = "💳"
 
 class TripCreate(BaseModel):
     name: str
@@ -101,6 +125,13 @@ class VehicleSetupRequest(BaseModel):
     benchmark_mileage: Optional[float] = None
     initial_odometer: float = 0.0
 
+class TripVehicleCreate(BaseModel):
+    vehicle_type: str = "Car"
+    brand_model: str = "Maruti Suzuki Ertiga"
+    fuel_type: str = "CNG"
+    benchmark_mileage: Optional[float] = None
+    initial_odometer: float = 0.0
+
 class FuelLogCreate(BaseModel):
     date: str
     odometer_reading: float
@@ -110,6 +141,7 @@ class FuelLogCreate(BaseModel):
     fuel_price_per_unit: float
     is_full_tank: Optional[bool] = True
     fuel_type: Optional[str] = "Petrol"
+    vehicle_id: Optional[int] = None
     payer_id: Optional[int] = None
     notes: Optional[str] = ""
     add_to_expenses: Optional[bool] = False
@@ -282,6 +314,77 @@ def reset_password(payload: ResetPasswordRequest):
             "mobile": user.get("mobile") or ""
         }
     }
+
+
+@app.put("/api/auth/profile")
+def update_profile(payload: UserProfileUpdate, authorization: Optional[str] = Header(None), x_session_token: Optional[str] = Header(None)):
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+    elif x_session_token:
+        token = x_session_token.strip()
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id FROM sessions WHERE token = ?", (token,))
+    s_row = cursor.fetchone()
+    if not s_row:
+        conn.close()
+        raise HTTPException(status_code=401, detail="Session expired or invalid")
+
+    user_id = s_row[0]
+    cursor.execute("UPDATE users SET name = ?, mobile = ? WHERE id = ?", (name, payload.mobile.strip(), user_id))
+    conn.commit()
+    cursor.execute("SELECT id, name, email, mobile FROM users WHERE id = ?", (user_id,))
+    u_row = cursor.fetchone()
+    conn.close()
+    return {"message": "Profile updated successfully", "user": dict(u_row)}
+
+
+@app.post("/api/auth/change-password")
+def change_password(payload: ChangePasswordRequest, authorization: Optional[str] = Header(None), x_session_token: Optional[str] = Header(None)):
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+    elif x_session_token:
+        token = x_session_token.strip()
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    if not payload.new_password or len(payload.new_password) < 4:
+        raise HTTPException(status_code=400, detail="New password must be at least 4 characters long")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT u.id, u.password_hash 
+        FROM sessions s 
+        JOIN users u ON s.user_id = u.id 
+        WHERE s.token = ?
+    """, (token,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=401, detail="Session expired or invalid")
+
+    user_id, stored_hash = row[0], row[1]
+    if not verify_password(payload.current_password, stored_hash):
+        conn.close()
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    new_hash = hash_password(payload.new_password)
+    cursor.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, user_id))
+    conn.commit()
+    conn.close()
+    return {"message": "Password changed successfully"}
 
 
 # ----------------- TRIP ENDPOINTS -----------------
@@ -825,6 +928,63 @@ def api_mileage_catalogs():
     return get_vehicle_catalogs()
 
 
+# ----------------- MULTI-VEHICLE & MILEAGE TRACKING ENDPOINTS -----------------
+@app.get("/api/mileage/catalogs")
+def api_mileage_catalogs():
+    return get_vehicle_catalogs()
+
+
+@app.get("/api/trips/{trip_id}/vehicles")
+def api_get_trip_vehicles(trip_id: int):
+    vehicles = get_trip_vehicles(trip_id)
+    if not vehicles:
+        # Default Ertiga CNG vehicle seeded if none configured yet
+        v = add_trip_vehicle(trip_id, "Car", "Maruti Suzuki Ertiga", "CNG", 26.11, 0.0)
+        vehicles = [v]
+    return {"vehicles": vehicles}
+
+
+@app.post("/api/trips/{trip_id}/vehicles")
+def api_add_trip_vehicle(trip_id: int, payload: TripVehicleCreate):
+    benchmark = payload.benchmark_mileage
+    if benchmark is None or benchmark <= 0:
+        benchmark = get_default_benchmark(payload.vehicle_type, payload.brand_model, payload.fuel_type)
+    v = add_trip_vehicle(
+        trip_id=trip_id,
+        vehicle_type=payload.vehicle_type,
+        brand_model=payload.brand_model,
+        fuel_type=payload.fuel_type,
+        benchmark_mileage=benchmark,
+        initial_odometer=payload.initial_odometer
+    )
+    return v
+
+
+@app.put("/api/trips/{trip_id}/vehicles/{vehicle_id}")
+def api_update_trip_vehicle(trip_id: int, vehicle_id: int, payload: TripVehicleCreate):
+    benchmark = payload.benchmark_mileage
+    if benchmark is None or benchmark <= 0:
+        benchmark = get_default_benchmark(payload.vehicle_type, payload.brand_model, payload.fuel_type)
+    v = update_trip_vehicle(
+        trip_id=trip_id,
+        vehicle_id=vehicle_id,
+        vehicle_type=payload.vehicle_type,
+        brand_model=payload.brand_model,
+        fuel_type=payload.fuel_type,
+        benchmark_mileage=benchmark,
+        initial_odometer=payload.initial_odometer
+    )
+    if not v:
+        raise HTTPException(status_code=404, detail="Vehicle not found")
+    return v
+
+
+@app.delete("/api/trips/{trip_id}/vehicles/{vehicle_id}")
+def api_delete_trip_vehicle(trip_id: int, vehicle_id: int):
+    delete_trip_vehicle(trip_id, vehicle_id)
+    return {"message": "Vehicle removed successfully"}
+
+
 @app.get("/api/trips/{trip_id}/vehicle")
 def api_get_trip_vehicle(trip_id: int):
     vehicle = get_trip_vehicle(trip_id)
@@ -857,8 +1017,8 @@ def api_set_trip_vehicle(trip_id: int, payload: VehicleSetupRequest):
 
 
 @app.get("/api/trips/{trip_id}/fuel-logs")
-def api_get_fuel_logs(trip_id: int):
-    return {"logs": get_fuel_logs(trip_id)}
+def api_get_fuel_logs(trip_id: int, vehicle_id: Optional[int] = None):
+    return {"logs": get_fuel_logs(trip_id, vehicle_id)}
 
 
 @app.post("/api/trips/{trip_id}/fuel-logs")
@@ -867,14 +1027,21 @@ def api_create_fuel_log(trip_id: int, payload: FuelLogCreate):
     cursor = conn.cursor()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    v_row = cursor.execute("SELECT id, fuel_type FROM trip_vehicles WHERE trip_id = ?", (trip_id,)).fetchone()
+    v_row = None
+    if payload.vehicle_id:
+        v_row = cursor.execute("SELECT id, fuel_type, brand_model FROM trip_vehicles WHERE id = ? AND trip_id = ?", (payload.vehicle_id, trip_id)).fetchone()
+    if not v_row:
+        v_row = cursor.execute("SELECT id, fuel_type, brand_model FROM trip_vehicles WHERE trip_id = ? ORDER BY id ASC LIMIT 1", (trip_id,)).fetchone()
+
     v_id = v_row["id"] if v_row else None
     v_fuel = v_row["fuel_type"] if v_row else (payload.fuel_type or "Petrol")
+    v_model = v_row["brand_model"] if v_row else ""
 
     expense_id = None
     if payload.add_to_expenses and payload.payer_id:
         unit = "kg" if v_fuel == "CNG" else "L"
-        exp_title = f"Fuel ({v_fuel}) - {payload.fuel_quantity} {unit}"
+        prefix = f"{v_model} - " if v_model else ""
+        exp_title = f"{prefix}Fuel ({v_fuel}) - {payload.fuel_quantity} {unit}"
         cursor.execute("""
         INSERT INTO expenses (trip_id, title, amount, date, category, payer_id, split_type, payment_mode, notes, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -930,12 +1097,20 @@ def api_update_fuel_log(trip_id: int, log_id: int, payload: FuelLogCreate):
         conn.close()
         raise HTTPException(status_code=404, detail="Fuel log not found")
 
-    v_row = cursor.execute("SELECT id, fuel_type FROM trip_vehicles WHERE trip_id = ?", (trip_id,)).fetchone()
+    v_row = None
+    if payload.vehicle_id:
+        v_row = cursor.execute("SELECT id, fuel_type, brand_model FROM trip_vehicles WHERE id = ? AND trip_id = ?", (payload.vehicle_id, trip_id)).fetchone()
+    if not v_row:
+        v_row = cursor.execute("SELECT id, fuel_type, brand_model FROM trip_vehicles WHERE trip_id = ? ORDER BY id ASC LIMIT 1", (trip_id,)).fetchone()
+
+    v_id = v_row["id"] if v_row else None
     v_fuel = v_row["fuel_type"] if v_row else (payload.fuel_type or "Petrol")
+    v_model = v_row["brand_model"] if v_row else ""
 
     if log["expense_id"] and payload.add_to_expenses and payload.payer_id:
         unit = "kg" if v_fuel == "CNG" else "L"
-        exp_title = f"Fuel ({v_fuel}) - {payload.fuel_quantity} {unit}"
+        prefix = f"{v_model} - " if v_model else ""
+        exp_title = f"{prefix}Fuel ({v_fuel}) - {payload.fuel_quantity} {unit}"
         cursor.execute("""
             UPDATE expenses
             SET title = ?, amount = ?, date = ?, payer_id = ?, split_type = ?, notes = ?
@@ -952,11 +1127,11 @@ def api_update_fuel_log(trip_id: int, log_id: int, payload: FuelLogCreate):
 
     cursor.execute("""
         UPDATE fuel_logs
-        SET date = ?, odometer_reading = ?, distance_run = ?, fuel_amount = ?,
+        SET vehicle_id = ?, date = ?, odometer_reading = ?, distance_run = ?, fuel_amount = ?,
             fuel_quantity = ?, fuel_price_per_unit = ?, is_full_tank = ?, payer_id = ?, notes = ?
         WHERE id = ? AND trip_id = ?
     """, (
-        payload.date, payload.odometer_reading, payload.distance_run or 0.0,
+        v_id, payload.date, payload.odometer_reading, payload.distance_run or 0.0,
         payload.fuel_amount, payload.fuel_quantity, payload.fuel_price_per_unit,
         1 if payload.is_full_tank else 0, payload.payer_id, payload.notes or "",
         log_id, trip_id
@@ -985,8 +1160,50 @@ def api_delete_fuel_log(trip_id: int, log_id: int):
 
 
 @app.get("/api/trips/{trip_id}/mileage-summary")
-def api_get_mileage_summary(trip_id: int):
-    return calculate_trip_mileage_summary(trip_id)
+def api_get_mileage_summary(trip_id: int, vehicle_id: Optional[int] = None):
+    return calculate_trip_mileage_summary(trip_id, vehicle_id)
+
+
+# ----------------- SETTINGS & CUSTOMIZATION ENDPOINTS -----------------
+@app.get("/api/trips/{trip_id}/categories")
+def api_get_categories(trip_id: int):
+    return {"categories": get_trip_categories(trip_id)}
+
+
+@app.post("/api/trips/{trip_id}/categories")
+def api_add_category(trip_id: int, payload: CategoryCreate):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Category name cannot be empty")
+    cat = add_trip_category(trip_id, name, payload.icon or "🏷️")
+    return cat
+
+
+@app.delete("/api/trips/{trip_id}/categories/{category_id}")
+def api_delete_category(trip_id: int, category_id: int):
+    delete_trip_category(trip_id, category_id)
+    return {"message": "Category deleted"}
+
+
+@app.get("/api/trips/{trip_id}/payment-modes")
+def api_get_payment_modes(trip_id: int):
+    return {"payment_modes": get_trip_payment_modes(trip_id)}
+
+
+@app.post("/api/trips/{trip_id}/payment-modes")
+def api_add_payment_mode(trip_id: int, payload: PaymentModeCreate):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Payment mode name cannot be empty")
+    mode = add_trip_payment_mode(trip_id, name, payload.icon or "💳")
+    return mode
+
+
+@app.delete("/api/trips/{trip_id}/payment-modes/{mode_id}")
+def api_delete_payment_mode(trip_id: int, mode_id: int):
+    delete_trip_payment_mode(trip_id, mode_id)
+    return {"message": "Payment mode deleted"}
+
 
 
 # Mount static files for frontend SPA with no-cache headers to prevent stale asset issues

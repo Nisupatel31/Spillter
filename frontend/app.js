@@ -48,11 +48,18 @@ let vehicleCatalogs = null;
 let currentTripVehicle = null;
 let currentFuelLogs = [];
 let currentMileageSummary = null;
+let tripVehicles = [];
+let selectedVehicleId = null;
+
+// Settings state
+let tripCategories = [];
+let tripPaymentModes = [];
 
 // Chart instances
 let categoryChart = null;
 let memberSpendChart = null;
 let dailyTrendChart = null;
+let paymentModeChart = null;
 
 // Category icons & styling
 const CATEGORY_META = {
@@ -404,12 +411,18 @@ function switchTab(tabId) {
       if (categoryChart) categoryChart.resize();
       if (memberSpendChart) memberSpendChart.resize();
       if (dailyTrendChart) dailyTrendChart.resize();
+      if (paymentModeChart) paymentModeChart.resize();
     }, 100);
   }
 
   // Load fuel and mileage data when opening mileage tab
   if (tabId === 'mileage' && currentTripId) {
     loadMileageData(currentTripId);
+  }
+
+  // Load settings data when opening settings tab
+  if (tabId === 'settings' && currentTripId) {
+    loadSettingsData();
   }
 
   lucide.createIcons();
@@ -513,6 +526,10 @@ async function loadTripData(tripId) {
     members = await memRes.json();
     populatePayerDropdown();
     renderMembersTab();
+
+    // 2b. Get Custom Categories & Payment Modes
+    await loadTripCategories(tripId);
+    await loadTripPaymentModes(tripId);
 
     // 3. Get Expenses
     const expRes = await authFetch(`/api/trips/${tripId}/expenses`);
@@ -736,6 +753,63 @@ function renderCharts(data) {
       }
     }
   });
+
+  // 4. Payment Modes Breakdown Chart
+  const payCanvas = document.getElementById('paymentModeChart');
+  if (payCanvas) {
+    const payCounts = {};
+    expenses.forEach(e => {
+      const mode = e.payment_mode || 'UPI';
+      payCounts[mode] = (payCounts[mode] || 0) + (e.amount || 0);
+    });
+    const payLabels = Object.keys(payCounts);
+    const payValues = Object.values(payCounts);
+    const payPalette = ['#4f46e5', '#10b981', '#f59e0b', '#06b6d4', '#ec4899', '#8b5cf6', '#64748b'];
+
+    if (paymentModeChart) paymentModeChart.destroy();
+    paymentModeChart = new Chart(payCanvas, {
+      type: 'doughnut',
+      data: {
+        labels: payLabels.length ? payLabels : ['No Expenses'],
+        datasets: [{
+          data: payValues.length ? payValues : [1],
+          backgroundColor: payValues.length ? payPalette.slice(0, payLabels.length) : ['#94a3b8'],
+          borderWidth: 2,
+          borderColor: doughnutBorder
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false }
+        },
+        cutout: '65%'
+      }
+    });
+
+    const payLegendBox = document.getElementById('paymentModeLegend');
+    if (payLegendBox) {
+      payLegendBox.innerHTML = '';
+      const totalAmount = payValues.reduce((a, b) => a + b, 0);
+      payLabels.forEach((lbl, idx) => {
+        const val = payCounts[lbl];
+        const pct = totalAmount > 0 ? Math.round((val / totalAmount) * 100) : 0;
+        const color = payPalette[idx % payPalette.length];
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between py-1 border-b border-slate-100 dark:border-slate-800 last:border-0 text-xs';
+        row.innerHTML = `
+          <div class="flex items-center space-x-1.5 truncate">
+            <span class="w-2 h-2 rounded-full shrink-0" style="background-color: ${color}"></span>
+            <span class="font-medium text-slate-700 dark:text-slate-300 truncate">${lbl}</span>
+            <span class="text-slate-400">(${pct}%)</span>
+          </div>
+          <span class="font-bold text-slate-900 dark:text-white shrink-0">${curr}${val.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+        `;
+        payLegendBox.appendChild(row);
+      });
+    }
+  }
 }
 
 function renderRecentExpensesTable(recentList) {
@@ -890,8 +964,13 @@ async function loadSettlement(tripId) {
 
     // Render Settlements ("Who Pays Whom")
     const settleBox = document.getElementById('settlementsContainer');
-    settleBox.innerHTML = '';
-    document.getElementById('settlementTxnCount').innerText = `${data.settlements.length} Transactions`;
+    if (settleBox) settleBox.innerHTML = '';
+    if (document.getElementById('settlementTxnCount')) {
+      document.getElementById('settlementTxnCount').innerText = `${data.settlements.length} Transactions`;
+    }
+    if (document.getElementById('settlementTxnCountStrip')) {
+      document.getElementById('settlementTxnCountStrip').innerText = `${data.settlements.length} to Settle`;
+    }
 
     if (data.settlements.length === 0) {
       settleBox.innerHTML = `
@@ -1283,6 +1362,8 @@ function openAddExpenseModal() {
 
   document.getElementById('addExpenseForm').reset();
   document.getElementById('expDate').value = new Date().toISOString().split('T')[0];
+  populateCategoryDropdown();
+  populatePaymentModeDropdown();
   populatePayerDropdown();
   setSplitType('equal');
   openModal('addExpenseModal');
@@ -1308,6 +1389,8 @@ function editExpenseItem(expenseId) {
   if (ocrBanner) ocrBanner.classList.add('hidden');
 
   // Fill form inputs
+  populateCategoryDropdown();
+  populatePaymentModeDropdown();
   document.getElementById('expTitle').value = exp.title || '';
   document.getElementById('expAmount').value = exp.amount ? exp.amount.toString() : '';
   document.getElementById('expDate').value = exp.date || new Date().toISOString().split('T')[0];
@@ -2396,19 +2479,39 @@ async function fetchVehicleCatalogs() {
 async function loadMileageData(tripId = currentTripId) {
   if (!tripId) return;
   try {
-    // 1. Fetch trip vehicle
-    const vRes = await authFetch(`/api/trips/${tripId}/vehicle`);
-    currentTripVehicle = vRes.ok ? await vRes.json() : null;
+    // 1. Fetch trip vehicles
+    const vRes = await authFetch(`/api/trips/${tripId}/vehicles`);
+    tripVehicles = vRes.ok ? (await vRes.json()).vehicles || [] : [];
 
-    // 2. Fetch fuel logs
-    const lRes = await authFetch(`/api/trips/${tripId}/fuel-logs`);
+    // Ensure selectedVehicleId is valid if set
+    if (selectedVehicleId !== null && !tripVehicles.some(v => v.id === selectedVehicleId)) {
+      selectedVehicleId = null;
+    }
+
+    // 2. Fetch fuel logs & summary based on selected vehicle or entire fleet
+    let logsUrl = `/api/trips/${tripId}/fuel-logs`;
+    let summaryUrl = `/api/trips/${tripId}/mileage-summary`;
+    if (selectedVehicleId !== null) {
+      logsUrl += `?vehicle_id=${selectedVehicleId}`;
+      summaryUrl += `?vehicle_id=${selectedVehicleId}`;
+    }
+
+    const [lRes, sRes] = await Promise.all([
+      authFetch(logsUrl),
+      authFetch(summaryUrl)
+    ]);
+
     const lData = lRes.ok ? await lRes.json() : [];
     currentFuelLogs = Array.isArray(lData) ? lData : (lData.logs || []);
-
-    // 3. Fetch summary
-    const sRes = await authFetch(`/api/trips/${tripId}/mileage-summary`);
     currentMileageSummary = sRes.ok ? await sRes.json() : null;
 
+    if (selectedVehicleId !== null) {
+      currentTripVehicle = tripVehicles.find(v => v.id === selectedVehicleId) || null;
+    } else {
+      currentTripVehicle = tripVehicles.length > 0 ? tripVehicles[0] : null;
+    }
+
+    renderVehiclePills();
     renderMileageTab();
     renderDashboardMileageWidget();
   } catch (err) {
@@ -2416,86 +2519,230 @@ async function loadMileageData(tripId = currentTripId) {
   }
 }
 
+function renderVehiclePills() {
+  const container = document.getElementById('vehicleTabsList');
+  if (!container) return;
+
+  if (!tripVehicles || tripVehicles.length === 0) {
+    container.innerHTML = `<span class="text-xs text-slate-400 italic">No vehicles added yet</span>`;
+    return;
+  }
+
+  const isFleetActive = selectedVehicleId === null;
+  let html = `
+    <button type="button" onclick="selectVehicleTab(null)" class="vehicle-tab-btn px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shrink-0 ${isFleetActive ? 'active' : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'}">
+      <span>🚘</span>
+      <span>All Fleet (${tripVehicles.length})</span>
+    </button>
+  `;
+
+  tripVehicles.forEach(veh => {
+    const isActive = selectedVehicleId === veh.id;
+    const typeEmoji = veh.vehicle_type === 'Bike' ? '🏍️' : '🚗';
+    html += `
+      <button type="button" onclick="selectVehicleTab(${veh.id})" class="vehicle-tab-btn px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shrink-0 ${isActive ? 'active' : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'}">
+        <span>${typeEmoji}</span>
+        <span>${escapeHtml(veh.brand_model)}</span>
+        <span class="text-[10px] px-1.5 py-0.2 rounded-md ${veh.fuel_type === 'CNG' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : (veh.fuel_type === 'Diesel' ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300')}">${veh.fuel_type}</span>
+      </button>
+    `;
+  });
+
+  container.innerHTML = html;
+}
+
+function selectVehicleTab(vehicleId) {
+  selectedVehicleId = vehicleId;
+  loadMileageData(currentTripId);
+}
+
 function renderMileageTab() {
   const summary = currentMileageSummary;
+  const isFleet = selectedVehicleId === null;
   const vehicle = currentTripVehicle;
-  const isCng = vehicle && vehicle.fuel_type === 'CNG';
-  const qtyUnit = isCng ? 'kg' : 'L';
-  const mileageUnit = isCng ? 'km/kg' : 'km/L';
 
   // 1. Update navigation badge
   const navBadge = document.getElementById('navMileageBadge');
   if (navBadge) {
     if (summary && summary.total_distance_km > 0) {
       navBadge.innerText = `${summary.total_distance_km} km`;
-    } else if (vehicle) {
-      navBadge.innerText = `${vehicle.fuel_type}`;
+    } else if (tripVehicles && tripVehicles.length > 0) {
+      navBadge.innerText = `${tripVehicles.length} Veh`;
     } else {
       navBadge.innerText = '0 km';
     }
   }
 
-  // 2. Render Vehicle Status Info Banner
+  const fleetOverviewEl = document.getElementById('fleetOverviewContainer');
   const bannerEl = document.getElementById('vehicleConfigBanner');
-  if (bannerEl) {
-    if (vehicle) {
-      const typeEmoji = vehicle.vehicle_type === 'Bike' ? '🏍️' : '🚗';
-      const fuelBadgeColor = vehicle.fuel_type === 'CNG' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
-                             (vehicle.fuel_type === 'Diesel' ? 'bg-blue-100 text-blue-800 border-blue-300' : 'bg-amber-100 text-amber-800 border-amber-300');
 
-      bannerEl.innerHTML = `
-        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div class="flex items-center space-x-3.5">
-            <div class="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-2xl shrink-0">
-              ${typeEmoji}
-            </div>
-            <div>
-              <div class="flex items-center space-x-2 flex-wrap gap-y-1">
-                <h3 class="text-lg font-black text-slate-900">${vehicle.brand_model}</h3>
-                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold border ${fuelBadgeColor}">
-                  ${vehicle.fuel_type}
-                </span>
-                <span class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700">
-                  ${vehicle.vehicle_type}
-                </span>
-              </div>
-              <div class="flex items-center space-x-3 text-xs text-slate-500 mt-1 flex-wrap gap-y-1">
-                <span>Claimed Benchmark: <strong class="text-slate-800">${vehicle.benchmark_mileage} ${mileageUnit}</strong></span>
-                <span>&bull;</span>
-                <span>Trip Starting Odometer: <strong class="text-slate-800">${(vehicle.initial_odometer || 0).toLocaleString()} km</strong></span>
-                <span>&bull;</span>
-                <span>Latest Odometer: <strong class="text-slate-800">${summary ? (summary.latest_odometer || vehicle.initial_odometer || 0).toLocaleString() : (vehicle.initial_odometer || 0).toLocaleString()} km</strong></span>
-              </div>
-            </div>
+  if (isFleet && tripVehicles.length > 0) {
+    // Show Fleet Overview and hide single vehicle banner
+    if (bannerEl) bannerEl.classList.add('hidden');
+    if (fleetOverviewEl) {
+      fleetOverviewEl.classList.remove('hidden');
+
+      const fleetItems = (summary && summary.vehicles && summary.vehicles.length > 0)
+        ? summary.vehicles
+        : tripVehicles.map(v => ({
+            vehicle: v,
+            total_distance_km: 0,
+            total_fuel_quantity: 0,
+            total_fuel_cost: 0,
+            average_mileage: 0,
+            benchmark_mileage: v.benchmark_mileage,
+            mileage_unit: v.fuel_type === 'CNG' ? 'km/kg' : 'km/L',
+            quantity_unit: v.fuel_type === 'CNG' ? 'kg' : 'L',
+            efficiency_percentage: 0,
+            efficiency_label: 'No fuel logs yet',
+            cost_per_km: 0
+          }));
+
+      fleetOverviewEl.innerHTML = `
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-2">
+            <h3 class="text-base font-bold text-slate-900 dark:text-white">Trip Fleet Vehicles (${tripVehicles.length})</h3>
+            <span class="text-xs text-slate-500 dark:text-slate-400">• Click any vehicle below to inspect logs</span>
           </div>
-          <div class="flex items-center space-x-2 shrink-0">
-            <button onclick="openVehicleSetupModal()" class="px-3.5 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shadow-2xs">
-              <i data-lucide="edit-2" class="w-3.5 h-3.5"></i>
-              <span>Edit Vehicle</span>
-            </button>
-          </div>
-        </div>
-      `;
-    } else {
-      bannerEl.innerHTML = `
-        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 py-2">
-          <div class="flex items-center space-x-3.5">
-            <div class="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-2xl shrink-0">
-              🚗
-            </div>
-            <div>
-              <h3 class="text-base font-bold text-slate-900">Setup your Trip Vehicle (Car or Bike)</h3>
-              <p class="text-xs text-slate-500 mt-0.5">
-                Choose your vehicle brand &amp; model (e.g. Maruti Suzuki Ertiga CNG) to start calculating real mileage, fuel consumption, and running cost per km.
-              </p>
-            </div>
-          </div>
-          <button onclick="openVehicleSetupModal()" class="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center space-x-1.5 shrink-0">
-            <i data-lucide="plus-circle" class="w-4 h-4"></i>
-            <span>Configure Vehicle</span>
+          <button onclick="openAddVehicleModal()" class="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center space-x-1">
+            <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+            <span>Add Another Vehicle</span>
           </button>
         </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          ${fleetItems.map(item => {
+            const v = item.vehicle;
+            const typeEmoji = v.vehicle_type === 'Bike' ? '🏍️' : '🚗';
+            const fuelBadgeColor = v.fuel_type === 'CNG' ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800' :
+                                   (v.fuel_type === 'Diesel' ? 'bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800' : 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800');
+
+            return `
+              <div class="bg-white dark:bg-slate-900 rounded-2xl p-4 sm:p-5 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-700 transition">
+                <div>
+                  <div class="flex items-start justify-between">
+                    <div class="flex items-center space-x-3">
+                      <div class="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-900 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-xl shrink-0">
+                        ${typeEmoji}
+                      </div>
+                      <div>
+                        <h4 class="text-sm font-black text-slate-900 dark:text-white">${escapeHtml(v.brand_model)}</h4>
+                        <div class="flex items-center space-x-1.5 mt-0.5">
+                          <span class="px-2 py-0.5 rounded-full text-[10px] font-bold border ${fuelBadgeColor}">
+                            ${v.fuel_type}
+                          </span>
+                          <span class="text-[11px] text-slate-500 dark:text-slate-400">ARAI: ${item.benchmark_mileage} ${item.mileage_unit}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="flex items-center space-x-1">
+                      <button onclick="openEditVehicleModal(${v.id})" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-slate-800 rounded-lg transition" title="Edit Vehicle Specs">
+                        <i data-lucide="edit-2" class="w-3.5 h-3.5"></i>
+                      </button>
+                      <button onclick="deleteTripVehicle(${v.id})" class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-slate-800 rounded-lg transition" title="Delete Vehicle">
+                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-center">
+                    <div>
+                      <span class="text-[10px] uppercase font-bold text-slate-400">Distance</span>
+                      <p class="text-xs font-black text-slate-800 dark:text-slate-200">${item.total_distance_km} km</p>
+                    </div>
+                    <div>
+                      <span class="text-[10px] uppercase font-bold text-slate-400">Avg Mileage</span>
+                      <p class="text-xs font-black text-emerald-600 dark:text-emerald-400">${item.average_mileage > 0 ? `${item.average_mileage} ${item.mileage_unit}` : '-'}</p>
+                    </div>
+                    <div>
+                      <span class="text-[10px] uppercase font-bold text-slate-400">Fuel Cost</span>
+                      <p class="text-xs font-black text-slate-800 dark:text-slate-200">₹${item.total_fuel_cost.toLocaleString('en-IN')}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="mt-4 pt-2">
+                  <button onclick="selectVehicleTab(${v.id})" class="w-full py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-950/80 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5">
+                    <span>Inspect Vehicle Logs</span>
+                    <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+                  </button>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
       `;
+    }
+  } else {
+    // Specific vehicle selected or 0 vehicles
+    if (fleetOverviewEl) fleetOverviewEl.classList.add('hidden');
+    if (bannerEl) {
+      bannerEl.classList.remove('hidden');
+
+      if (vehicle) {
+        const typeEmoji = vehicle.vehicle_type === 'Bike' ? '🏍️' : '🚗';
+        const isCng = vehicle.fuel_type === 'CNG';
+        const mileageUnit = isCng ? 'km/kg' : 'km/L';
+        const fuelBadgeColor = vehicle.fuel_type === 'CNG' ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800' :
+                               (vehicle.fuel_type === 'Diesel' ? 'bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800' : 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800');
+
+        bannerEl.innerHTML = `
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div class="flex items-center space-x-3.5">
+              <div class="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-900 flex items-center justify-center text-2xl shrink-0">
+                ${typeEmoji}
+              </div>
+              <div>
+                <div class="flex items-center space-x-2 flex-wrap gap-y-1">
+                  <h3 class="text-lg font-black text-slate-900 dark:text-white">${escapeHtml(vehicle.brand_model)}</h3>
+                  <span class="px-2.5 py-0.5 rounded-full text-xs font-bold border ${fuelBadgeColor}">
+                    ${vehicle.fuel_type}
+                  </span>
+                  <span class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                    ${vehicle.vehicle_type}
+                  </span>
+                </div>
+                <div class="flex items-center space-x-3 text-xs text-slate-500 dark:text-slate-400 mt-1 flex-wrap gap-y-1">
+                  <span>Claimed Benchmark: <strong class="text-slate-800 dark:text-slate-200">${vehicle.benchmark_mileage} ${mileageUnit}</strong></span>
+                  <span>&bull;</span>
+                  <span>Trip Starting Odo: <strong class="text-slate-800 dark:text-slate-200">${(vehicle.initial_odometer || 0).toLocaleString()} km</strong></span>
+                  <span>&bull;</span>
+                  <span>Latest Odometer: <strong class="text-slate-800 dark:text-slate-200">${summary ? (summary.latest_odometer || vehicle.initial_odometer || 0).toLocaleString() : (vehicle.initial_odometer || 0).toLocaleString()} km</strong></span>
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center space-x-2 shrink-0">
+              <button onclick="openEditVehicleModal(${vehicle.id})" class="px-3.5 py-2 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shadow-2xs">
+                <i data-lucide="edit-2" class="w-3.5 h-3.5"></i>
+                <span>Edit Vehicle</span>
+              </button>
+              <button onclick="deleteTripVehicle(${vehicle.id})" class="px-3.5 py-2 border border-rose-200 dark:border-rose-900/50 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shadow-2xs">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                <span>Delete</span>
+              </button>
+            </div>
+          </div>
+        `;
+      } else {
+        bannerEl.innerHTML = `
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 py-2">
+            <div class="flex items-center space-x-3.5">
+              <div class="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-900 flex items-center justify-center text-2xl shrink-0">
+                🚗
+              </div>
+              <div>
+                <h3 class="text-base font-bold text-slate-900 dark:text-white">Setup your Trip Vehicle (Car or Bike)</h3>
+                <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Choose your vehicle brand &amp; model to start calculating real mileage, fuel consumption, and running cost per km.
+                </p>
+              </div>
+            </div>
+            <button onclick="openAddVehicleModal()" class="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center space-x-1.5 shrink-0">
+              <i data-lucide="plus-circle" class="w-4 h-4"></i>
+              <span>Configure Vehicle</span>
+            </button>
+          </div>
+        `;
+      }
     }
   }
 
@@ -2505,7 +2752,13 @@ function renderMileageTab() {
     if (kpiDistance) kpiDistance.innerText = `${summary.total_distance_km} km`;
 
     const kpiOdoSub = document.getElementById('mileageKpiOdoSub');
-    if (kpiOdoSub) kpiOdoSub.innerText = `Departure: ${(summary.initial_odometer || 0).toLocaleString()} km → Latest: ${(summary.latest_odometer || 0).toLocaleString()} km`;
+    if (kpiOdoSub) {
+      if (isFleet) {
+        kpiOdoSub.innerText = `${tripVehicles.length} Vehicles in Fleet`;
+      } else {
+        kpiOdoSub.innerText = `Departure: ${(summary.initial_odometer || 0).toLocaleString()} km → Latest: ${(summary.latest_odometer || 0).toLocaleString()} km`;
+      }
+    }
 
     const kpiMileage = document.getElementById('mileageKpiMileage');
     if (kpiMileage) kpiMileage.innerText = summary.average_mileage.toFixed(2);
@@ -2553,37 +2806,44 @@ function renderMileageTab() {
     if (tableBody) {
       tableBody.innerHTML = currentFuelLogs.map(log => {
         const runDistText = log.calculated_segment_distance > 0 ? `+${log.calculated_segment_distance} km` : '-';
-        const segMileageText = log.calculated_segment_mileage > 0 ? `${log.calculated_segment_mileage} ${summary ? summary.mileage_unit : 'km/L'}` : '-';
+        const segMileageText = log.calculated_segment_mileage > 0 ? `${log.calculated_segment_mileage} ${log.vehicle_fuel === 'CNG' ? 'km/kg' : 'km/L'}` : '-';
         const splitBadge = log.expense_id
-          ? `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Split in Group ✓</span>`
+          ? `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">Split in Group ✓</span>`
           : `<span class="text-slate-400 text-xs">-</span>`;
         const tankBadge = log.is_full_tank
-          ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">Full Tank</span>`
-          : `<span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-600">Partial</span>`;
+          ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">Full Tank</span>`
+          : `<span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">Partial</span>`;
 
         const payerAvatar = log.payer_name
           ? `<div class="flex items-center space-x-1.5">
                <div class="w-5 h-5 rounded-full text-white text-[10px] flex items-center justify-center font-bold" style="background-color: ${log.payer_color || '#6366F1'}">
                  ${log.payer_name.charAt(0).toUpperCase()}
                </div>
-               <span class="text-xs font-medium text-slate-800">${log.payer_name}</span>
+               <span class="text-xs font-medium text-slate-800 dark:text-slate-200">${escapeHtml(log.payer_name)}</span>
              </div>`
           : `<span class="text-xs text-slate-400">-</span>`;
 
+        const vehBadge = log.vehicle_brand_model
+          ? `<div class="text-[10px] font-semibold text-slate-500 dark:text-slate-400 truncate max-w-[130px]">${escapeHtml(log.vehicle_brand_model)}</div>`
+          : '';
+
         return `
-          <tr class="hover:bg-slate-50/70 transition">
-            <td class="px-3.5 py-3 whitespace-nowrap font-medium text-slate-800">${log.date}</td>
-            <td class="px-3.5 py-3 whitespace-nowrap font-bold text-slate-900">${(log.odometer_reading || 0).toLocaleString()} km</td>
-            <td class="px-3.5 py-3 whitespace-nowrap font-semibold text-indigo-700">${runDistText}</td>
-            <td class="px-3.5 py-3 whitespace-nowrap font-medium text-slate-800">${log.fuel_quantity} ${summary ? summary.quantity_unit : 'kg'}</td>
-            <td class="px-3.5 py-3 whitespace-nowrap text-slate-600">₹${log.fuel_price_per_unit ? log.fuel_price_per_unit.toFixed(2) : '-'}</td>
-            <td class="px-3.5 py-3 whitespace-nowrap font-bold text-slate-900">₹${(log.fuel_amount || 0).toFixed(2)}</td>
-            <td class="px-3.5 py-3 whitespace-nowrap font-bold text-emerald-600">${segMileageText}</td>
+          <tr class="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition">
+            <td class="px-3.5 py-3 whitespace-nowrap">
+              <span class="font-medium text-slate-800 dark:text-slate-200">${log.date}</span>
+              ${vehBadge}
+            </td>
+            <td class="px-3.5 py-3 whitespace-nowrap font-bold text-slate-900 dark:text-white">${(log.odometer_reading || 0).toLocaleString()} km</td>
+            <td class="px-3.5 py-3 whitespace-nowrap font-semibold text-indigo-600 dark:text-indigo-400">${runDistText}</td>
+            <td class="px-3.5 py-3 whitespace-nowrap font-medium text-slate-800 dark:text-slate-200">${log.fuel_quantity} ${log.vehicle_fuel === 'CNG' ? 'kg' : 'L'}</td>
+            <td class="px-3.5 py-3 whitespace-nowrap text-slate-600 dark:text-slate-400">₹${log.fuel_price_per_unit ? log.fuel_price_per_unit.toFixed(2) : '-'}</td>
+            <td class="px-3.5 py-3 whitespace-nowrap font-bold text-slate-900 dark:text-white">₹${(log.fuel_amount || 0).toFixed(2)}</td>
+            <td class="px-3.5 py-3 whitespace-nowrap font-bold text-emerald-600 dark:text-emerald-400">${segMileageText}</td>
             <td class="px-3.5 py-3 whitespace-nowrap">${tankBadge}</td>
             <td class="px-3.5 py-3 whitespace-nowrap">${payerAvatar}</td>
             <td class="px-3.5 py-3 whitespace-nowrap">${splitBadge}</td>
             <td class="px-3.5 py-3 whitespace-nowrap text-right">
-              <button onclick="deleteFuelLog(${log.id})" class="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition" title="Delete fuel stop">
+              <button onclick="deleteFuelLog(${log.id})" class="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950 transition" title="Delete fuel stop">
                 <i data-lucide="trash-2" class="w-4 h-4"></i>
               </button>
             </td>
@@ -2593,31 +2853,37 @@ function renderMileageTab() {
     }
   }
 
-  lucide.createIcons();
+  if (window.lucide) lucide.createIcons();
 }
 
 function renderDashboardMileageWidget() {
   const card = document.getElementById('dashMileageCard');
   if (!card) return;
 
-  if (!currentTripVehicle && (!currentFuelLogs || currentFuelLogs.length === 0)) {
+  if ((!tripVehicles || tripVehicles.length === 0) && (!currentFuelLogs || currentFuelLogs.length === 0)) {
     card.classList.add('hidden');
     return;
   }
 
   card.classList.remove('hidden');
-  const vehicle = currentTripVehicle || {
+  const vehicle = currentTripVehicle || (tripVehicles.length > 0 ? tripVehicles[0] : {
     brand_model: 'Maruti Suzuki Ertiga',
     fuel_type: 'CNG',
     vehicle_type: 'Car'
-  };
+  });
   const summary = currentMileageSummary;
 
   const iconWrap = document.getElementById('dashVehIconWrap');
   if (iconWrap) iconWrap.innerText = vehicle.vehicle_type === 'Bike' ? '🏍️' : '🚗';
 
   const modelEl = document.getElementById('dashVehModel');
-  if (modelEl) modelEl.innerText = vehicle.brand_model;
+  if (modelEl) {
+    if (selectedVehicleId === null && tripVehicles.length > 1) {
+      modelEl.innerText = `Fleet (${tripVehicles.length} Vehicles)`;
+    } else {
+      modelEl.innerText = vehicle.brand_model;
+    }
+  }
 
   const fuelEl = document.getElementById('dashVehFuelBadge');
   if (fuelEl) fuelEl.innerText = vehicle.fuel_type;
@@ -2636,33 +2902,54 @@ function renderDashboardMileageWidget() {
   const costEl = document.getElementById('dashVehCostPerKm');
   if (costEl) costEl.innerText = summary ? `₹${summary.cost_per_km.toFixed(2)} / km` : '₹0.00 / km';
 
-  lucide.createIcons();
+  if (window.lucide) lucide.createIcons();
 }
 
-// --- VEHICLE SETUP MODAL HANDLERS ---
+// --- VEHICLE MODAL HANDLERS (ADD / EDIT) ---
 
-async function openVehicleSetupModal() {
+async function openAddVehicleModal() {
   await fetchVehicleCatalogs();
-  const veh = currentTripVehicle;
-  const initialType = veh ? veh.vehicle_type : 'Car';
+  document.getElementById('vehEditVehicleId').value = '';
+  document.getElementById('vehicleSetupModalTitle').innerText = 'Add New Vehicle to Trip Fleet';
+  document.getElementById('vehicleSetupModalSubtitle').innerText = 'Add another car or bike to track individual mileage and fuel';
 
-  selectVehicleType(initialType);
-
-  if (veh) {
-    populateVehicleModelDropdown(initialType, veh.brand_model);
-    selectFuelType(veh.fuel_type);
-    document.getElementById('vehBenchmarkMileage').value = veh.benchmark_mileage;
-    document.getElementById('vehInitialOdometer').value = veh.initial_odometer;
-  } else {
-    // Default to Maruti Suzuki Ertiga CNG
-    populateVehicleModelDropdown('Car', 'Maruti Suzuki Ertiga');
-    selectFuelType('CNG');
-    document.getElementById('vehBenchmarkMileage').value = '26.11';
-    document.getElementById('vehInitialOdometer').value = '0';
-  }
+  selectVehicleType('Car');
+  populateVehicleModelDropdown('Car', 'Maruti Suzuki Ertiga');
+  selectFuelType('CNG');
+  document.getElementById('vehBenchmarkMileage').value = '26.11';
+  document.getElementById('vehInitialOdometer').value = '0';
 
   openModal('vehicleSetupModal');
-  lucide.createIcons();
+  if (window.lucide) lucide.createIcons();
+}
+
+async function openEditVehicleModal(vehicleId) {
+  await fetchVehicleCatalogs();
+  const veh = tripVehicles.find(v => v.id === vehicleId) || currentTripVehicle;
+  if (!veh) return;
+
+  document.getElementById('vehEditVehicleId').value = veh.id;
+  document.getElementById('vehicleSetupModalTitle').innerText = `Edit Vehicle: ${veh.brand_model}`;
+  document.getElementById('vehicleSetupModalSubtitle').innerText = 'Update vehicle details, benchmark mileage, or starting odometer';
+
+  selectVehicleType(veh.vehicle_type);
+  populateVehicleModelDropdown(veh.vehicle_type, veh.brand_model);
+  selectFuelType(veh.fuel_type);
+  document.getElementById('vehBenchmarkMileage').value = veh.benchmark_mileage;
+  document.getElementById('vehInitialOdometer').value = veh.initial_odometer;
+
+  openModal('vehicleSetupModal');
+  if (window.lucide) lucide.createIcons();
+}
+
+async function openVehicleSetupModal() {
+  if (selectedVehicleId) {
+    await openEditVehicleModal(selectedVehicleId);
+  } else if (tripVehicles.length > 0) {
+    await openEditVehicleModal(tripVehicles[0].id);
+  } else {
+    await openAddVehicleModal();
+  }
 }
 
 function selectVehicleType(type) {
@@ -2675,14 +2962,12 @@ function selectVehicleType(type) {
     carBtn.className = 'py-2.5 px-4 rounded-xl text-xs font-bold border-2 border-indigo-600 bg-indigo-50 text-indigo-700 flex items-center justify-center space-x-2 transition';
     bikeBtn.className = 'py-2.5 px-4 rounded-xl text-xs font-bold border-2 border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 flex items-center justify-center space-x-2 transition';
 
-    // Show CNG and Diesel buttons for cars
     document.getElementById('fuelTypeBtn-CNG').classList.remove('hidden');
     document.getElementById('fuelTypeBtn-Diesel').classList.remove('hidden');
   } else {
     bikeBtn.className = 'py-2.5 px-4 rounded-xl text-xs font-bold border-2 border-indigo-600 bg-indigo-50 text-indigo-700 flex items-center justify-center space-x-2 transition';
     carBtn.className = 'py-2.5 px-4 rounded-xl text-xs font-bold border-2 border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 flex items-center justify-center space-x-2 transition';
 
-    // Two-wheelers in India are predominantly petrol
     document.getElementById('fuelTypeBtn-CNG').classList.add('hidden');
     document.getElementById('fuelTypeBtn-Diesel').classList.add('hidden');
     selectFuelType('Petrol');
@@ -2733,18 +3018,15 @@ function onVehicleModelSelectChange() {
     customWrap.classList.add('hidden');
   }
 
-  // Lookup model in catalog to get benchmark
   const type = document.getElementById('vehTypeInput').value;
   const list = (vehicleCatalogs && vehicleCatalogs[type]) ? vehicleCatalogs[type] : [];
   const found = list.find(item => item.model === modelVal);
 
   if (found) {
     const currentFuel = document.getElementById('vehFuelTypeInput').value;
-    // Check if current fuel exists in model
     if (found.fuels[currentFuel]) {
       document.getElementById('vehBenchmarkMileage').value = found.fuels[currentFuel].benchmark;
     } else {
-      // Pick first available fuel
       const firstFuel = Object.keys(found.fuels)[0];
       selectFuelType(firstFuel);
       document.getElementById('vehBenchmarkMileage').value = found.fuels[firstFuel].benchmark;
@@ -2768,13 +3050,11 @@ function selectFuelType(fuel) {
     }
   });
 
-  // Update benchmark unit label
   const unitLabel = document.getElementById('vehBenchmarkUnitLabel');
   if (unitLabel) {
     unitLabel.innerText = fuel === 'CNG' ? 'km/kg' : 'km/L';
   }
 
-  // Auto-refresh benchmark from model if possible
   const select = document.getElementById('vehModelSelect');
   if (select && select.value !== 'Custom') {
     const type = document.getElementById('vehTypeInput').value;
@@ -2790,6 +3070,7 @@ async function submitVehicleSetup(e) {
   e.preventDefault();
   if (!currentTripId) return;
 
+  const editId = document.getElementById('vehEditVehicleId').value;
   const vehicleType = document.getElementById('vehTypeInput').value;
   const selectVal = document.getElementById('vehModelSelect').value;
   const customVal = document.getElementById('vehCustomModelInput').value.trim();
@@ -2808,14 +3089,23 @@ async function submitVehicleSetup(e) {
   };
 
   try {
-    const res = await authFetch(`/api/trips/${currentTripId}/vehicle`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    let res;
+    if (editId) {
+      res = await authFetch(`/api/trips/${currentTripId}/vehicles/${editId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    } else {
+      res = await authFetch(`/api/trips/${currentTripId}/vehicles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    }
 
     if (res.ok) {
-      showToast(`Vehicle configured: ${brandModel} (${fuelType}) 🚗`);
+      showToast(editId ? `Vehicle updated: ${brandModel} 🚗` : `Vehicle added to fleet: ${brandModel} 🚗`);
       closeModal('vehicleSetupModal');
       await loadMileageData(currentTripId);
     } else {
@@ -2828,34 +3118,68 @@ async function submitVehicleSetup(e) {
   }
 }
 
+async function deleteTripVehicle(vehicleId) {
+  const veh = tripVehicles.find(v => v.id === vehicleId);
+  const name = veh ? veh.brand_model : 'this vehicle';
+  if (!confirm(`Are you sure you want to remove "${name}" from the trip fleet? Associated fuel stops will also be removed.`)) return;
+  if (!currentTripId) return;
+
+  try {
+    const res = await authFetch(`/api/trips/${currentTripId}/vehicles/${vehicleId}`, {
+      method: 'DELETE'
+    });
+
+    if (res.ok) {
+      showToast(`Vehicle "${name}" removed from trip fleet.`);
+      if (selectedVehicleId === vehicleId) {
+        selectedVehicleId = null;
+      }
+      await loadMileageData(currentTripId);
+    } else {
+      const errData = await res.json();
+      showToast(errData.detail || 'Failed to delete vehicle', true);
+    }
+  } catch (err) {
+    console.error(err);
+    showToast('Error deleting vehicle', true);
+  }
+}
+
 // --- FUEL LOG MODAL HANDLERS ---
 
 function openLogFuelModal() {
   if (!currentTripId) return;
 
-  // 1. Pre-fill date with today
+  if (!tripVehicles || tripVehicles.length === 0) {
+    showToast('Please add a vehicle to your trip fleet first!', true);
+    openAddVehicleModal();
+    return;
+  }
+
+  // 1. Populate vehicle dropdown
+  const vehSelect = document.getElementById('fuelVehicleSelect');
+  if (vehSelect) {
+    vehSelect.innerHTML = tripVehicles.map(v => 
+      `<option value="${v.id}" ${(selectedVehicleId === v.id || (!selectedVehicleId && v.id === tripVehicles[0].id)) ? 'selected' : ''}>
+        ${v.vehicle_type === 'Bike' ? '🏍️' : '🚗'} ${escapeHtml(v.brand_model)} (${v.fuel_type})
+      </option>`
+    ).join('');
+  }
+
+  // 2. Pre-fill date with today
   const today = new Date().toISOString().split('T')[0];
   document.getElementById('fuelDate').value = today;
 
-  // 2. Set previous odometer hint
-  const prevOdo = (currentMileageSummary && currentMileageSummary.latest_odometer > 0)
-    ? currentMileageSummary.latest_odometer
-    : (currentTripVehicle ? (currentTripVehicle.initial_odometer || 0) : 0);
-  document.getElementById('fuelPrevOdoHint').innerText = prevOdo.toLocaleString();
-
-  // 3. Set unit labels
-  const isCng = currentTripVehicle && currentTripVehicle.fuel_type === 'CNG';
-  const qtyUnit = isCng ? 'kg' : 'L';
-  const rateUnit = isCng ? '₹/kg' : '₹/L';
-
-  document.getElementById('fuelQtyUnitLabel').innerText = qtyUnit;
-  document.getElementById('fuelRateUnitLabel').innerText = rateUnit;
+  // 3. Update dynamic unit labels and previous odometer
+  onFuelModalVehicleChange();
 
   // 4. Populate payer dropdown
   const payerSelect = document.getElementById('fuelPayer');
-  payerSelect.innerHTML = members.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+  if (payerSelect) {
+    payerSelect.innerHTML = members.map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('');
+  }
 
-  // 5. Clear input fields
+  // 5. Clear inputs
   document.getElementById('fuelOdometer').value = '';
   document.getElementById('fuelQuantity').value = '';
   document.getElementById('fuelPrice').value = '';
@@ -2865,7 +3189,35 @@ function openLogFuelModal() {
   document.getElementById('fuelAddToExpenses').checked = true;
 
   openModal('logFuelModal');
-  lucide.createIcons();
+  if (window.lucide) lucide.createIcons();
+}
+
+function onFuelModalVehicleChange() {
+  const vehSelect = document.getElementById('fuelVehicleSelect');
+  const vehId = vehSelect ? parseInt(vehSelect.value) : null;
+  const veh = tripVehicles.find(v => v.id === vehId) || currentTripVehicle;
+
+  const isCng = veh && veh.fuel_type === 'CNG';
+  const qtyUnit = isCng ? 'kg' : 'L';
+  const rateUnit = isCng ? '₹/kg' : '₹/L';
+
+  const qtyLabel = document.getElementById('fuelQtyUnitLabel');
+  const rateLabel = document.getElementById('fuelRateUnitLabel');
+  if (qtyLabel) qtyLabel.innerText = qtyUnit;
+  if (rateLabel) rateLabel.innerText = rateUnit;
+
+  let prevOdo = (veh && veh.initial_odometer) ? veh.initial_odometer : 0;
+  if (veh && currentMileageSummary && currentMileageSummary.vehicles) {
+    const vSumm = currentMileageSummary.vehicles.find(s => s.vehicle.id === veh.id);
+    if (vSumm && vSumm.latest_odometer > 0) {
+      prevOdo = vSumm.latest_odometer;
+    }
+  } else if (currentMileageSummary && currentMileageSummary.latest_odometer > 0) {
+    prevOdo = currentMileageSummary.latest_odometer;
+  }
+
+  const prevOdoHint = document.getElementById('fuelPrevOdoHint');
+  if (prevOdoHint) prevOdoHint.innerText = prevOdo.toLocaleString();
 }
 
 function onFuelCalcChange(trigger) {
@@ -2892,6 +3244,8 @@ async function submitFuelLog(e) {
   e.preventDefault();
   if (!currentTripId) return;
 
+  const vehSelect = document.getElementById('fuelVehicleSelect');
+  const vehicleId = vehSelect && vehSelect.value ? parseInt(vehSelect.value) : null;
   const date = document.getElementById('fuelDate').value;
   const odometerReading = parseFloat(document.getElementById('fuelOdometer').value) || 0.0;
   const fuelQuantity = parseFloat(document.getElementById('fuelQuantity').value) || 0.0;
@@ -2913,6 +3267,7 @@ async function submitFuelLog(e) {
 
   const payload = {
     date,
+    vehicle_id: vehicleId,
     odometer_reading: odometerReading,
     fuel_quantity: fuelQuantity,
     fuel_price_per_unit: fuelPrice > 0 ? fuelPrice : (fuelAmount / fuelQuantity),
@@ -2931,10 +3286,11 @@ async function submitFuelLog(e) {
     });
 
     if (res.ok) {
-      showToast(`Fuel stop logged: ${fuelQuantity} ${currentTripVehicle && currentTripVehicle.fuel_type === 'CNG' ? 'kg' : 'L'} (₹${fuelAmount}) ⛽`);
+      const activeVeh = tripVehicles.find(v => v.id === vehicleId);
+      const isCng = activeVeh && activeVeh.fuel_type === 'CNG';
+      showToast(`Fuel stop logged: ${fuelQuantity} ${isCng ? 'kg' : 'L'} (₹${fuelAmount}) ⛽`);
       closeModal('logFuelModal');
 
-      // If added to expenses, refresh full trip data (expenses, settlement, dashboard)
       if (addToExpenses) {
         await loadTripData(currentTripId);
       } else {
@@ -2971,5 +3327,465 @@ async function deleteFuelLog(logId) {
     showToast('Error deleting fuel stop', true);
   }
 }
+
+// =========================================================================
+// CUSTOM CATEGORIES & PAYMENT MODES MANAGEMENT
+// =========================================================================
+
+async function loadTripCategories(tripId = currentTripId) {
+  if (!tripId) return;
+  try {
+    const res = await authFetch(`/api/trips/${tripId}/categories`);
+    if (res.ok) {
+      const data = await res.json();
+      tripCategories = data.categories || [];
+      populateCategoryDropdown();
+      renderSettingsCategoriesList();
+    }
+  } catch (err) {
+    console.error('Error loading trip categories:', err);
+  }
+}
+
+function populateCategoryDropdown() {
+  const expCat = document.getElementById('expCategory');
+  const catFilter = document.getElementById('categoryFilter');
+  const scanCat = document.getElementById('scanCategory');
+
+  const defaultCats = [
+    { name: 'Food', icon: '🍽️' },
+    { name: 'Stay', icon: '🏨' },
+    { name: 'Travel', icon: '🚗' },
+    { name: 'Activities', icon: '🏄' },
+    { name: 'Sightseeing', icon: '📸' },
+    { name: 'Shopping', icon: '🛍️' },
+    { name: 'Misc', icon: '📦' }
+  ];
+
+  const catsToUse = (tripCategories && tripCategories.length > 0) ? tripCategories : defaultCats;
+
+  if (expCat) {
+    const currentVal = expCat.value;
+    expCat.innerHTML = catsToUse.map(c => 
+      `<option value="${c.name}">${c.icon || '🏷️'} ${escapeHtml(c.name)}</option>`
+    ).join('');
+    if (currentVal && catsToUse.some(c => c.name === currentVal)) {
+      expCat.value = currentVal;
+    }
+  }
+
+  if (scanCat) {
+    const currentVal = scanCat.value;
+    scanCat.innerHTML = catsToUse.map(c => 
+      `<option value="${c.name}">${c.icon || '🏷️'} ${escapeHtml(c.name)}</option>`
+    ).join('');
+    if (currentVal && catsToUse.some(c => c.name === currentVal)) {
+      scanCat.value = currentVal;
+    }
+  }
+
+  if (catFilter) {
+    const currentVal = catFilter.value;
+    catFilter.innerHTML = `<option value="all">All Categories</option>` + catsToUse.map(c => 
+      `<option value="${c.name}">${c.icon || '🏷️'} ${escapeHtml(c.name)}</option>`
+    ).join('');
+    if (currentVal) {
+      catFilter.value = currentVal;
+    }
+  }
+}
+
+function renderSettingsCategoriesList() {
+  const container = document.getElementById('settingsCategoriesList');
+  const countBadge = document.getElementById('settingsCategoryCount');
+
+  if (countBadge) {
+    countBadge.innerText = tripCategories ? tripCategories.length : 0;
+  }
+
+  if (!container) return;
+
+  if (!tripCategories || tripCategories.length === 0) {
+    container.innerHTML = `<p class="text-xs text-slate-400 py-1 italic">No custom categories configured for this trip yet.</p>`;
+    return;
+  }
+
+  container.innerHTML = tripCategories.map(cat => `
+    <div class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-800 dark:text-slate-200 shadow-2xs group hover:border-slate-300 dark:hover:border-slate-600 transition">
+      <span>${cat.icon || '🏷️'}</span>
+      <span>${escapeHtml(cat.name)}</span>
+      <button type="button" onclick="handleDeleteCategory(${cat.id})" class="text-slate-400 hover:text-rose-600 ml-1.5 p-0.5 rounded transition" title="Delete category">
+        ✕
+      </button>
+    </div>
+  `).join('');
+}
+
+async function handleAddCategory(e) {
+  e.preventDefault();
+  if (!currentTripId) return;
+
+  const nameInput = document.getElementById('newCatName');
+  const iconInput = document.getElementById('newCatIcon');
+  const name = nameInput.value.trim();
+  const icon = iconInput ? (iconInput.value.trim() || '🏷️') : '🏷️';
+
+  if (!name) {
+    showToast('Please enter category name', true);
+    return;
+  }
+
+  try {
+    const res = await authFetch(`/api/trips/${currentTripId}/categories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, icon })
+    });
+
+    if (res.ok) {
+      nameInput.value = '';
+      showToast(`Category "${name}" added! 🏷️`);
+      await loadTripCategories(currentTripId);
+    } else {
+      const errData = await res.json();
+      showToast(errData.detail || 'Failed to add category', true);
+    }
+  } catch (err) {
+    console.error(err);
+    showToast('Error adding category', true);
+  }
+}
+
+async function handleDeleteCategory(catId) {
+  if (!confirm('Are you sure you want to remove this category?')) return;
+  if (!currentTripId) return;
+
+  try {
+    const res = await authFetch(`/api/trips/${currentTripId}/categories/${catId}`, {
+      method: 'DELETE'
+    });
+
+    if (res.ok) {
+      showToast('Category removed');
+      await loadTripCategories(currentTripId);
+    } else {
+      const errData = await res.json();
+      showToast(errData.detail || 'Failed to remove category', true);
+    }
+  } catch (err) {
+    console.error(err);
+    showToast('Error removing category', true);
+  }
+}
+
+async function loadTripPaymentModes(tripId = currentTripId) {
+  if (!tripId) return;
+  try {
+    const res = await authFetch(`/api/trips/${tripId}/payment-modes`);
+    if (res.ok) {
+      const data = await res.json();
+      tripPaymentModes = data.payment_modes || [];
+      populatePaymentModeDropdown();
+      renderSettingsPaymentModesList();
+    }
+  } catch (err) {
+    console.error('Error loading trip payment modes:', err);
+  }
+}
+
+function populatePaymentModeDropdown() {
+  const expMode = document.getElementById('expPaymentMode');
+  const defaultModes = [
+    { name: 'UPI', icon: '📱' },
+    { name: 'Cash', icon: '💵' },
+    { name: 'Credit Card', icon: '💳' },
+    { name: 'Debit Card', icon: '💳' },
+    { name: 'Net Banking', icon: '🏦' }
+  ];
+
+  const modesToUse = (tripPaymentModes && tripPaymentModes.length > 0) ? tripPaymentModes : defaultModes;
+
+  if (expMode) {
+    const currentVal = expMode.value;
+    expMode.innerHTML = modesToUse.map(m => 
+      `<option value="${m.name}">${m.icon || '💳'} ${escapeHtml(m.name)}</option>`
+    ).join('');
+    if (currentVal && modesToUse.some(m => m.name === currentVal)) {
+      expMode.value = currentVal;
+    }
+  }
+}
+
+function renderSettingsPaymentModesList() {
+  const container = document.getElementById('settingsPaymentModesList');
+  const countBadge = document.getElementById('settingsPaymentModeCount');
+
+  if (countBadge) {
+    countBadge.innerText = tripPaymentModes ? tripPaymentModes.length : 0;
+  }
+
+  if (!container) return;
+
+  if (!tripPaymentModes || tripPaymentModes.length === 0) {
+    container.innerHTML = `<p class="text-xs text-slate-400 py-1 italic">No payment modes configured for this trip yet.</p>`;
+    return;
+  }
+
+  container.innerHTML = tripPaymentModes.map(mode => `
+    <div class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-800 dark:text-slate-200 shadow-2xs group hover:border-slate-300 dark:hover:border-slate-600 transition">
+      <span>${mode.icon || '💳'}</span>
+      <span>${escapeHtml(mode.name)}</span>
+      <button type="button" onclick="handleDeletePaymentMode(${mode.id})" class="text-slate-400 hover:text-rose-600 ml-1.5 p-0.5 rounded transition" title="Delete payment mode">
+        ✕
+      </button>
+    </div>
+  `).join('');
+}
+
+async function handleAddPaymentMode(e) {
+  e.preventDefault();
+  if (!currentTripId) return;
+
+  const nameInput = document.getElementById('newModeName');
+  const iconInput = document.getElementById('newModeIcon');
+  const name = nameInput.value.trim();
+  const icon = iconInput ? (iconInput.value.trim() || '💳') : '💳';
+
+  if (!name) {
+    showToast('Please enter payment mode name', true);
+    return;
+  }
+
+  try {
+    const res = await authFetch(`/api/trips/${currentTripId}/payment-modes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, icon })
+    });
+
+    if (res.ok) {
+      nameInput.value = '';
+      showToast(`Payment mode "${name}" added! 💳`);
+      await loadTripPaymentModes(currentTripId);
+    } else {
+      const errData = await res.json();
+      showToast(errData.detail || 'Failed to add payment mode', true);
+    }
+  } catch (err) {
+    console.error(err);
+    showToast('Error adding payment mode', true);
+  }
+}
+
+async function handleDeletePaymentMode(modeId) {
+  if (!confirm('Are you sure you want to remove this payment mode?')) return;
+  if (!currentTripId) return;
+
+  try {
+    const res = await authFetch(`/api/trips/${currentTripId}/payment-modes/${modeId}`, {
+      method: 'DELETE'
+    });
+
+    if (res.ok) {
+      showToast('Payment mode removed');
+      await loadTripPaymentModes(currentTripId);
+    } else {
+      const errData = await res.json();
+      showToast(errData.detail || 'Failed to remove payment mode', true);
+    }
+  } catch (err) {
+    console.error(err);
+    showToast('Error removing payment mode', true);
+  }
+}
+
+// =========================================================================
+// SETTINGS MODULE & PROFILE SECURITY HANDLERS
+// =========================================================================
+
+async function loadSettingsData() {
+  if (!currentTripId) return;
+
+  // 1. Fill Trip Info Form
+  if (currentTrip) {
+    const nameInput = document.getElementById('settingsTripName');
+    const descInput = document.getElementById('settingsTripDesc');
+    const currInput = document.getElementById('settingsTripCurrency');
+    if (nameInput) nameInput.value = currentTrip.name || '';
+    if (descInput) descInput.value = currentTrip.description || '';
+    if (currInput) currInput.value = currentTrip.currency || '₹';
+  }
+
+  // 2. Fill User Profile Form
+  if (currentUser) {
+    const pName = document.getElementById('settingsProfileName');
+    const pMob = document.getElementById('settingsProfileMobile');
+    const pEmail = document.getElementById('settingsProfileEmail');
+    if (pName) pName.value = currentUser.name || '';
+    if (pMob) pMob.value = currentUser.mobile || '';
+    if (pEmail) pEmail.value = currentUser.email || '';
+  }
+
+  // 3. Render Categories & Payment modes lists
+  renderSettingsCategoriesList();
+  renderSettingsPaymentModesList();
+
+  if (window.lucide) lucide.createIcons();
+}
+
+async function handleSaveTripSettings(e) {
+  e.preventDefault();
+  if (!currentTripId) return;
+
+  const name = document.getElementById('settingsTripName').value.trim();
+  const description = document.getElementById('settingsTripDesc').value.trim();
+  const currency = document.getElementById('settingsTripCurrency').value.trim();
+
+  if (!name) {
+    showToast('Trip name cannot be empty', true);
+    return;
+  }
+
+  try {
+    const res = await authFetch(`/api/trips/${currentTripId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, description, currency: currency || '₹' })
+    });
+
+    if (res.ok) {
+      const updated = await res.json();
+      currentTrip = updated;
+      const tripOption = document.querySelector(`#tripSelect option[value="${currentTripId}"]`);
+      if (tripOption) tripOption.textContent = name;
+      renderTripBanner();
+      showToast('Trip settings updated successfully! ✨');
+      await loadDashboard(currentTripId);
+    } else {
+      const errData = await res.json();
+      showToast(errData.detail || 'Failed to update trip', true);
+    }
+  } catch (err) {
+    console.error(err);
+    showToast('Error saving trip settings', true);
+  }
+}
+
+async function handleDeleteTripFromSettings() {
+  if (!currentTripId) return;
+  const tripName = currentTrip ? currentTrip.name : 'this trip';
+  if (!confirm(`Are you sure you want to permanently delete "${tripName}"? All expenses, splits, and mileage logs will be erased.`)) return;
+
+  try {
+    const res = await authFetch(`/api/trips/${currentTripId}`, {
+      method: 'DELETE'
+    });
+
+    if (res.ok) {
+      showToast(`Trip "${tripName}" deleted successfully`);
+      currentTripId = null;
+      currentTrip = null;
+      await loadTrips();
+      switchTab('dashboard');
+    } else {
+      const errData = await res.json();
+      showToast(errData.detail || 'Failed to delete trip', true);
+    }
+  } catch (err) {
+    console.error(err);
+    showToast('Error deleting trip', true);
+  }
+}
+
+async function handleUpdateProfile(e) {
+  e.preventDefault();
+  const name = document.getElementById('settingsProfileName').value.trim();
+  const mobile = document.getElementById('settingsProfileMobile').value.trim();
+
+  if (!name) {
+    showToast('Please enter your name', true);
+    return;
+  }
+
+  try {
+    const res = await authFetch('/api/auth/profile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, mobile })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      currentUser = data.user;
+      updateUserUI(currentUser);
+      showToast('Profile updated successfully! 👤');
+    } else {
+      const errData = await res.json();
+      showToast(errData.detail || 'Failed to update profile', true);
+    }
+  } catch (err) {
+    console.error(err);
+    showToast('Error updating profile', true);
+  }
+}
+
+async function handleChangePassword(e) {
+  e.preventDefault();
+  const current_password = document.getElementById('settingsCurrPassword').value;
+  const new_password = document.getElementById('settingsNewPassword').value;
+  const confirm_password = document.getElementById('settingsConfirmPassword').value;
+
+  if (new_password !== confirm_password) {
+    showToast('New passwords do not match!', true);
+    return;
+  }
+
+  if (new_password.length < 4) {
+    showToast('New password must be at least 4 characters long', true);
+    return;
+  }
+
+  try {
+    const res = await authFetch('/api/auth/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current_password, new_password })
+    });
+
+    if (res.ok) {
+      document.getElementById('settingsCurrPassword').value = '';
+      document.getElementById('settingsNewPassword').value = '';
+      document.getElementById('settingsConfirmPassword').value = '';
+      showToast('Password changed successfully! 🔒');
+    } else {
+      const errData = await res.json();
+      showToast(errData.detail || 'Failed to change password', true);
+    }
+  } catch (err) {
+    console.error(err);
+    showToast('Error changing password', true);
+  }
+}
+
+// =========================================================================
+// INTERACTIVE DATE PICKER HELPER
+// =========================================================================
+
+function setupDatePickerHelpers() {
+  document.querySelectorAll('input[type="date"]').forEach(input => {
+    input.addEventListener('click', () => {
+      try {
+        if (typeof input.showPicker === 'function') {
+          input.showPicker();
+        }
+      } catch (err) {}
+    });
+  });
+}
+
+// Attach date picker helpers on initialization
+document.addEventListener('DOMContentLoaded', () => {
+  setupDatePickerHelpers();
+});
 
 

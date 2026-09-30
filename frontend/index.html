@@ -14,7 +14,7 @@
   <!-- Tesseract.js CDN for Client-Side OCR -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   
-  <link rel="stylesheet" href="/static/style.css?v=20260928_v5" />
+  <link rel="stylesheet" href="/static/style.css?v=20260930_v1" />
   <script>
     // Immediate inline handlers ensuring togglePasswordVisibility is 100% available without caching delays
     const EYE_SVG_RAW = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -175,6 +175,10 @@
           <span>Members</span>
           <span id="navMemberBadge" class="ml-1 px-1.5 py-0.5 text-[10px] sm:text-xs bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-full font-semibold">0</span>
         </button>
+        <button onclick="switchTab('settings')" id="tab-btn-settings" class="tab-btn inactive-tab inline-flex items-center space-x-1.5 px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-medium rounded-xl whitespace-nowrap">
+          <i data-lucide="settings" class="w-4 h-4"></i>
+          <span>Settings</span>
+        </button>
       </nav>
     </div>
   </header>
@@ -210,15 +214,9 @@
               <div class="flex items-center flex-wrap gap-2 sm:gap-3">
                 <h1 id="tripTitle" class="text-xl sm:text-2xl lg:text-3xl font-extrabold tracking-tight">Loading Trip...</h1>
                 <span id="tripCurrencyBadge" class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">₹ INR</span>
-                
-                <!-- Quick Trip Management: Edit (Rename) & Delete -->
-                <button onclick="openEditTripModal()" class="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-medium text-slate-200 border border-white/15 backdrop-blur-sm transition" title="Rename or edit trip details">
-                  <i data-lucide="pencil" class="w-3.5 h-3.5 text-indigo-300"></i>
-                  <span>Rename</span>
-                </button>
-                <button onclick="confirmDeleteTrip()" class="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-xs font-medium text-rose-300 border border-rose-500/30 backdrop-blur-sm transition" title="Delete this trip">
-                  <i data-lucide="trash-2" class="w-3.5 h-3.5 text-rose-400"></i>
-                  <span>Delete</span>
+                <button onclick="switchTab('settings')" class="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-medium text-slate-200 border border-white/15 backdrop-blur-sm transition" title="Manage trip in Settings">
+                  <i data-lucide="settings" class="w-3.5 h-3.5 text-indigo-300"></i>
+                  <span>Trip Settings</span>
                 </button>
               </div>
               <p id="tripDescription" class="text-xs sm:text-sm text-slate-300 mt-1 max-w-2xl">Trip description and details...</p>
@@ -363,16 +361,34 @@
         </div>
       </div>
 
-      <!-- Daily Spending Trend -->
-      <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs">
-        <div class="flex items-center justify-between mb-4">
-          <div>
-            <h3 class="text-base font-bold text-slate-900">Daily Expense Timeline</h3>
-            <p class="text-xs text-slate-500">Track how expenses unfolded across each day of the journey</p>
+      <!-- Charts Row 2: Timeline & Payment Mode Breakdown -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Daily Spending Trend -->
+        <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs lg:col-span-2">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h3 class="text-base font-bold text-slate-900">Daily Expense Timeline</h3>
+              <p class="text-xs text-slate-500">Track how expenses unfolded across each day of the journey</p>
+            </div>
+          </div>
+          <div class="h-60">
+            <canvas id="dailyTrendChart"></canvas>
           </div>
         </div>
-        <div class="h-60">
-          <canvas id="dailyTrendChart"></canvas>
+
+        <!-- Payment Modes Distribution -->
+        <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h3 class="text-base font-bold text-slate-900">Payment Modes</h3>
+              <p class="text-xs text-slate-500">UPI, Cash, Cards breakdown</p>
+            </div>
+            <span class="text-xs text-slate-400">Channels</span>
+          </div>
+          <div class="h-44 relative flex items-center justify-center">
+            <canvas id="paymentModeChart"></canvas>
+          </div>
+          <div id="paymentModeLegend" class="mt-3 space-y-1 max-h-28 overflow-y-auto pr-1 text-xs"></div>
         </div>
       </div>
 
@@ -446,27 +462,29 @@
     <!-- TAB 3: SETTLE UP & WHATSAPP SHARE -->
     <div id="tab-settlement" class="tab-content hidden space-y-6">
       
-      <!-- WhatsApp Sharing Highlight Banner -->
-      <div class="bg-gradient-to-r from-emerald-600 to-teal-700 rounded-2xl p-6 text-white shadow-md relative overflow-hidden">
-        <div class="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-          <div class="space-y-2">
+      <!-- Compact Settlement Header & Action Strip -->
+      <div class="bg-white dark:bg-slate-900 rounded-2xl p-4 sm:p-5 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shrink-0 shadow-sm shadow-emerald-500/20">
+            <i data-lucide="arrow-left-right" class="w-5 h-5"></i>
+          </div>
+          <div>
             <div class="flex items-center space-x-2">
-              <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-white/20 text-white uppercase tracking-wider">Group Settlement</span>
-              <span class="text-emerald-200 text-xs">● Instant 1-Click Share</span>
+              <h2 class="text-base sm:text-lg font-black text-slate-900 dark:text-white leading-tight">Settlement &amp; Settle Up</h2>
+              <span id="settlementTxnCountStrip" class="px-2 py-0.5 text-xs font-bold rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300">0 to Settle</span>
             </div>
-            <h2 class="text-2xl font-black">Share Final Settlement to WhatsApp</h2>
-            <p class="text-sm text-emerald-100 max-w-xl">Send the complete breakdown of who pays whom and how much directly to your travel WhatsApp group with neatly formatted emojis.</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Debts minimized with greedy balancing algorithm</p>
           </div>
-          <div class="flex items-center space-x-3 shrink-0">
-            <button onclick="copyWhatsAppText()" class="inline-flex items-center space-x-2 px-4 py-2.5 bg-white text-emerald-800 rounded-xl font-bold text-sm hover:bg-emerald-50 transition shadow-sm">
-              <i data-lucide="copy" class="w-4 h-4"></i>
-              <span>Copy Message</span>
-            </button>
-            <a id="btnOpenWhatsApp" href="#" target="_blank" class="inline-flex items-center space-x-2 px-5 py-2.5 bg-emerald-950 text-white rounded-xl font-bold text-sm hover:bg-black transition shadow-sm">
-              <i data-lucide="send" class="w-4 h-4 text-emerald-400"></i>
-              <span>Open in WhatsApp</span>
-            </a>
-          </div>
+        </div>
+        <div class="flex items-center space-x-2 shrink-0">
+          <button onclick="copyWhatsAppText()" class="inline-flex items-center space-x-1.5 px-3.5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition" title="Copy formatted settlement text">
+            <i data-lucide="copy" class="w-3.5 h-3.5 text-slate-500"></i>
+            <span>Copy Text</span>
+          </button>
+          <a id="btnOpenWhatsApp" href="#" target="_blank" class="inline-flex items-center space-x-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm shadow-emerald-600/30 transition transform active:scale-95" title="Send to WhatsApp group">
+            <i data-lucide="send" class="w-3.5 h-3.5"></i>
+            <span>Share on WhatsApp</span>
+          </a>
         </div>
       </div>
 
@@ -639,7 +657,23 @@
         </div>
       </div>
 
-      <!-- Vehicle Status Info Banner -->
+      <!-- Vehicle Selector Pill Bar (Multi-Vehicle Support) -->
+      <div class="bg-white dark:bg-slate-900 rounded-2xl p-3 sm:p-4 border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between gap-3 overflow-x-auto no-scrollbar">
+        <div class="flex items-center space-x-2" id="vehicleTabsList">
+          <!-- Dynamically populated: All Fleet + Vehicle pills -->
+        </div>
+        <button onclick="openAddVehicleModal()" class="inline-flex items-center space-x-1.5 px-3.5 py-2 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 text-xs font-bold rounded-xl border border-indigo-200 dark:border-indigo-800/50 transition shrink-0">
+          <i data-lucide="plus-circle" class="w-4 h-4"></i>
+          <span>Add Vehicle</span>
+        </button>
+      </div>
+
+      <!-- Fleet Overview Cards Container (Shown when All Fleet is selected) -->
+      <div id="fleetOverviewContainer" class="hidden space-y-4">
+        <!-- Fleet vehicles grid dynamically rendered here -->
+      </div>
+
+      <!-- Vehicle Status Info Banner (Shown when a specific vehicle is selected) -->
       <div id="vehicleConfigBanner" class="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs">
         <!-- Dynamically rendered: either empty prompt or active vehicle card -->
       </div>
@@ -777,6 +811,207 @@
       </div>
 
     </div>
+
+    <!-- TAB 7: SETTINGS & CUSTOMIZATION -->
+    <div id="tab-settings" class="tab-content hidden space-y-6">
+      
+      <!-- Settings Header -->
+      <div class="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-xl bg-brand-500/10 text-brand-600 dark:text-brand-400 flex items-center justify-center shrink-0">
+            <i data-lucide="settings" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h2 class="text-xl font-black text-slate-900 dark:text-white">Trip &amp; Account Settings</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Configure trip details, custom categories, payment methods, and account security</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings Grid: 2 Columns on Desktop -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        <!-- 1. TRIP SETTINGS & DANGER ZONE -->
+        <div class="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-xs space-y-5">
+          <div class="flex items-center space-x-2.5 pb-3 border-b border-slate-100 dark:border-slate-800">
+            <i data-lucide="plane" class="w-5 h-5 text-brand-600 dark:text-brand-400"></i>
+            <h3 class="text-base font-bold text-slate-900 dark:text-white">Trip Configuration</h3>
+          </div>
+
+          <form id="settingsTripForm" onsubmit="handleSaveTripSettings(event)" class="space-y-4">
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Trip Name *</label>
+              <input type="text" id="settingsTripName" required class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-brand-500 text-slate-900 dark:text-white" />
+            </div>
+
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Trip Description</label>
+              <textarea id="settingsTripDesc" rows="2" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 text-slate-900 dark:text-white"></textarea>
+            </div>
+
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Currency Symbol *</label>
+              <div class="flex items-center space-x-2">
+                <input type="text" id="settingsTripCurrency" required maxlength="5" class="w-24 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-bold text-center focus:outline-none focus:ring-2 focus:ring-brand-500 text-slate-900 dark:text-white" />
+                <span class="text-xs text-slate-400">e.g. ₹, $, €, £, AED</span>
+              </div>
+            </div>
+
+            <div class="pt-2">
+              <button type="submit" class="px-5 py-2.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold shadow-sm shadow-brand-600/30 transition transform active:scale-95 flex items-center space-x-2">
+                <i data-lucide="check" class="w-4 h-4"></i>
+                <span>Update Trip Details</span>
+              </button>
+            </div>
+          </form>
+
+          <!-- Danger Zone: Delete Trip -->
+          <div class="pt-4 border-t border-slate-100 dark:border-slate-800">
+            <div class="p-4 rounded-2xl bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200/80 dark:border-rose-900/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <p class="text-xs font-bold text-rose-800 dark:text-rose-300">Danger Zone: Delete Trip</p>
+                <p class="text-[11px] text-rose-600/80 dark:text-rose-400">Permanently removes this trip, members, expenses, and fuel records.</p>
+              </div>
+              <button type="button" onclick="handleDeleteTripFromSettings()" class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-xs transition shrink-0 flex items-center space-x-1.5">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                <span>Delete Trip</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. PROFILE & ACCOUNT SECURITY -->
+        <div class="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-xs space-y-5">
+          <div class="flex items-center space-x-2.5 pb-3 border-b border-slate-100 dark:border-slate-800">
+            <i data-lucide="shield" class="w-5 h-5 text-indigo-600 dark:text-indigo-400"></i>
+            <h3 class="text-base font-bold text-slate-900 dark:text-white">Profile &amp; Password Security</h3>
+          </div>
+
+          <!-- Profile info form -->
+          <form id="settingsProfileForm" onsubmit="handleUpdateProfile(event)" class="space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Your Name *</label>
+                <input type="text" id="settingsProfileName" required class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500 text-slate-900 dark:text-white" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Mobile Number</label>
+                <input type="tel" id="settingsProfileMobile" placeholder="e.g. 9876543210" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 text-slate-900 dark:text-white" />
+              </div>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Email Address</label>
+              <input type="email" id="settingsProfileEmail" disabled class="w-full bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-400 cursor-not-allowed" />
+            </div>
+            <button type="submit" class="px-4 py-2 bg-slate-800 dark:bg-slate-700 hover:bg-slate-900 dark:hover:bg-slate-600 text-white rounded-xl text-xs font-bold transition flex items-center space-x-1.5">
+              <i data-lucide="user-check" class="w-3.5 h-3.5"></i>
+              <span>Save Profile</span>
+            </button>
+          </form>
+
+          <!-- Change password form -->
+          <div class="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3">
+            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Change Account Password</h4>
+            <form id="settingsPasswordForm" onsubmit="handleChangePassword(event)" class="space-y-3">
+              <div>
+                <label class="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Current Password *</label>
+                <div class="relative">
+                  <input type="password" id="settingsCurrPassword" required placeholder="Enter current password" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 pr-10 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 text-slate-900 dark:text-white" />
+                  <button type="button" onclick="togglePasswordVisibility('settingsCurrPassword', 'settingsCurrPassEye')" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer">
+                    <span id="settingsCurrPassEye"><i data-lucide="eye" class="w-4 h-4"></i></span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">New Password *</label>
+                  <div class="relative">
+                    <input type="password" id="settingsNewPassword" required minlength="4" placeholder="New password" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 pr-10 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 text-slate-900 dark:text-white" />
+                    <button type="button" onclick="togglePasswordVisibility('settingsNewPassword', 'settingsNewPassEye')" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer">
+                      <span id="settingsNewPassEye"><i data-lucide="eye" class="w-4 h-4"></i></span>
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Confirm New Password *</label>
+                  <div class="relative">
+                    <input type="password" id="settingsConfirmPassword" required minlength="4" placeholder="Repeat new password" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 pr-10 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 text-slate-900 dark:text-white" />
+                    <button type="button" onclick="togglePasswordVisibility('settingsConfirmPassword', 'settingsConfPassEye')" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer">
+                      <span id="settingsConfPassEye"><i data-lucide="eye" class="w-4 h-4"></i></span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center space-x-1.5">
+                <i data-lucide="key-round" class="w-3.5 h-3.5"></i>
+                <span>Update Password</span>
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <!-- 3. CUSTOM CATEGORIES MANAGEMENT -->
+        <div class="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
+          <div class="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+            <div class="flex items-center space-x-2.5">
+              <i data-lucide="tags" class="w-5 h-5 text-emerald-600 dark:text-emerald-400"></i>
+              <div>
+                <h3 class="text-base font-bold text-slate-900 dark:text-white">Expense Categories</h3>
+                <p class="text-[11px] text-slate-500 dark:text-slate-400">Add or remove custom categories for this trip</p>
+              </div>
+            </div>
+            <span id="settingsCategoryCount" class="px-2 py-0.5 text-xs font-bold rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300">0</span>
+          </div>
+
+          <!-- Active Categories Chip Grid -->
+          <div id="settingsCategoriesList" class="flex flex-wrap gap-2 min-h-[60px] p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+            <!-- Dynamically populated chips with delete button -->
+          </div>
+
+          <!-- Add Category Form -->
+          <form id="settingsAddCategoryForm" onsubmit="handleAddCategory(event)" class="pt-2 flex items-center space-x-2">
+            <input type="text" id="newCatIcon" maxlength="4" value="🏷️" placeholder="🏷️" class="w-14 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-900 dark:text-white" title="Category Emoji Icon" />
+            <input type="text" id="newCatName" required placeholder="New Category (e.g. Scuba, Pubs, Souvenirs)" class="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-900 dark:text-white" />
+            <button type="submit" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shrink-0 flex items-center space-x-1">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+              <span>Add</span>
+            </button>
+          </form>
+        </div>
+
+        <!-- 4. CUSTOM PAYMENT MODES MANAGEMENT -->
+        <div class="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
+          <div class="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+            <div class="flex items-center space-x-2.5">
+              <i data-lucide="credit-card" class="w-5 h-5 text-indigo-600 dark:text-indigo-400"></i>
+              <div>
+                <h3 class="text-base font-bold text-slate-900 dark:text-white">Payment Modes</h3>
+                <p class="text-[11px] text-slate-500 dark:text-slate-400">Add or remove payment methods used across the trip</p>
+              </div>
+            </div>
+            <span id="settingsPaymentModeCount" class="px-2 py-0.5 text-xs font-bold rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-300">0</span>
+          </div>
+
+          <!-- Active Payment Modes Chip Grid -->
+          <div id="settingsPaymentModesList" class="flex flex-wrap gap-2 min-h-[60px] p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+            <!-- Dynamically populated chips with delete button -->
+          </div>
+
+          <!-- Add Payment Mode Form -->
+          <form id="settingsAddPaymentModeForm" onsubmit="handleAddPaymentMode(event)" class="pt-2 flex items-center space-x-2">
+            <input type="text" id="newModeIcon" maxlength="4" value="💳" placeholder="💳" class="w-14 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-white" title="Payment Mode Icon" />
+            <input type="text" id="newModeName" required placeholder="New Mode (e.g. Forex Card, Revolut, GPay)" class="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-white" />
+            <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shrink-0 flex items-center space-x-1">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+              <span>Add</span>
+            </button>
+          </form>
+        </div>
+
+      </div>
+    </div>
     <!-- END ACTIVE TRIP CONTENT VIEW -->
 
   </main>
@@ -849,12 +1084,18 @@
         <!-- Date & Category -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label class="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">Date *</label>
-            <input type="date" id="expDate" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white" />
+            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Date *</label>
+            <div class="relative">
+              <input type="date" id="expDate" required onclick="try{this.showPicker()}catch(e){}" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl pl-3.5 pr-10 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white dark:focus:bg-slate-900 cursor-pointer text-slate-900 dark:text-white" />
+              <button type="button" onclick="try{document.getElementById('expDate').showPicker()}catch(e){}" class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 cursor-pointer" title="Open Calendar">
+                <i data-lucide="calendar" class="w-4 h-4"></i>
+              </button>
+            </div>
           </div>
           <div>
-            <label class="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">Category *</label>
-            <select id="expCategory" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white">
+            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Category *</label>
+            <select id="expCategory" required class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white dark:focus:bg-slate-900 text-slate-900 dark:text-white">
+              <!-- Dynamically populated from trip_categories -->
               <option value="Food">🍽️ Food & Dining</option>
               <option value="Stay">🏨 Stay & Accommodation</option>
               <option value="Travel">🚗 Travel & Transport</option>
@@ -869,14 +1110,15 @@
         <!-- Paid By & Payment Mode -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label class="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">Paid By *</label>
-            <select id="expPayer" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white">
+            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Paid By *</label>
+            <select id="expPayer" required class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white dark:focus:bg-slate-900 text-slate-900 dark:text-white">
               <!-- Dynamically populated -->
             </select>
           </div>
           <div>
-            <label class="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">Payment Mode *</label>
-            <select id="expPaymentMode" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white">
+            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Payment Mode *</label>
+            <select id="expPaymentMode" required class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white dark:focus:bg-slate-900 text-slate-900 dark:text-white">
+              <!-- Dynamically populated from trip_payment_modes -->
               <option value="UPI">📱 UPI / QR</option>
               <option value="Cash">💵 Cash</option>
               <option value="Credit Card">💳 Credit Card</option>
@@ -1522,8 +1764,8 @@
             🚗
           </div>
           <div>
-            <h3 class="text-lg font-bold text-slate-900">Configure Trip Vehicle</h3>
-            <p class="text-xs text-slate-500">Select vehicle type, brand &amp; model, fuel type and benchmark mileage</p>
+            <h3 id="vehicleSetupModalTitle" class="text-lg font-bold text-slate-900 dark:text-white">Configure Trip Vehicle</h3>
+            <p id="vehicleSetupModalSubtitle" class="text-xs text-slate-500 dark:text-slate-400">Select vehicle type, brand &amp; model, fuel type and benchmark mileage</p>
           </div>
         </div>
         <button onclick="closeModal('vehicleSetupModal')" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
@@ -1532,6 +1774,7 @@
       </div>
 
       <form id="vehicleSetupForm" onsubmit="submitVehicleSetup(event)" class="mt-4 space-y-4">
+        <input type="hidden" id="vehEditVehicleId" value="" />
         <!-- Vehicle Type (Car / Bike) -->
         <div>
           <label class="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">Vehicle Type *</label>
@@ -1631,16 +1874,29 @@
       </div>
 
       <form id="logFuelForm" onsubmit="submitFuelLog(event)" class="mt-4 space-y-4">
+        <!-- Vehicle Refueled Selector -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Vehicle Refueled *</label>
+          <select id="fuelVehicleSelect" onchange="onFuelModalVehicleChange()" required class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-900 dark:text-white">
+            <!-- Dynamically populated -->
+          </select>
+        </div>
+
         <!-- Date & Odometer Reading -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label class="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">Date *</label>
-            <input type="date" id="fuelDate" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white" />
+            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Date *</label>
+            <div class="relative">
+              <input type="date" id="fuelDate" required onclick="try{this.showPicker()}catch(e){}" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl pl-3.5 pr-10 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white dark:focus:bg-slate-900 cursor-pointer text-slate-900 dark:text-white" />
+              <button type="button" onclick="try{document.getElementById('fuelDate').showPicker()}catch(e){}" class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 cursor-pointer" title="Open Calendar">
+                <i data-lucide="calendar" class="w-4 h-4"></i>
+              </button>
+            </div>
           </div>
           <div>
-            <label class="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">Odometer Reading (km) *</label>
-            <input type="text" inputmode="decimal" id="fuelOdometer" required oninput="validateDecimalInput(this)" placeholder="e.g. 45580" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white" />
-            <p class="text-[10px] text-slate-400 mt-0.5">Previous: <span id="fuelPrevOdoHint" class="font-semibold text-slate-600">-</span> km</p>
+            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Odometer Reading (km) *</label>
+            <input type="text" inputmode="decimal" id="fuelOdometer" required oninput="validateDecimalInput(this)" placeholder="e.g. 45580" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white dark:focus:bg-slate-900 text-slate-900 dark:text-white" />
+            <p class="text-[10px] text-slate-400 mt-0.5">Previous: <span id="fuelPrevOdoHint" class="font-semibold text-slate-600 dark:text-slate-300">-</span> km</p>
           </div>
         </div>
 
@@ -1720,6 +1976,6 @@
     <span id="toastMsg">Notification message</span>
   </div>
 
-  <script src="/static/app.js?v=20260928_v5"></script>
+  <script src="/static/app.js?v=20260930_v1"></script>
 </body>
 </html>
