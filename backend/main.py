@@ -937,10 +937,6 @@ def api_mileage_catalogs():
 @app.get("/api/trips/{trip_id}/vehicles")
 def api_get_trip_vehicles(trip_id: int):
     vehicles = get_trip_vehicles(trip_id)
-    if not vehicles:
-        # Default Ertiga CNG vehicle seeded if none configured yet
-        v = add_trip_vehicle(trip_id, "Car", "Maruti Suzuki Ertiga", "CNG", 26.11, 0.0)
-        vehicles = [v]
     return {"vehicles": vehicles}
 
 
@@ -988,16 +984,7 @@ def api_delete_trip_vehicle(trip_id: int, vehicle_id: int):
 @app.get("/api/trips/{trip_id}/vehicle")
 def api_get_trip_vehicle(trip_id: int):
     vehicle = get_trip_vehicle(trip_id)
-    if not vehicle:
-        vehicle = {
-            "trip_id": trip_id,
-            "vehicle_type": "Car",
-            "brand_model": "Maruti Suzuki Ertiga",
-            "fuel_type": "CNG",
-            "benchmark_mileage": 26.11,
-            "initial_odometer": 0.0
-        }
-    return vehicle
+    return vehicle or {}
 
 
 @app.post("/api/trips/{trip_id}/vehicle")

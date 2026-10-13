@@ -2895,7 +2895,9 @@ function renderMileageTab() {
 
     const kpiOdoSub = document.getElementById('mileageKpiOdoSub');
     if (kpiOdoSub) {
-      if (isFleet) {
+      if (!tripVehicles || tripVehicles.length === 0) {
+        kpiOdoSub.innerText = '0 Vehicles in Fleet';
+      } else if (isFleet) {
         kpiOdoSub.innerText = `${tripVehicles.length} Vehicles in Fleet`;
       } else {
         kpiOdoSub.innerText = `Departure: ${(summary.initial_odometer || 0).toLocaleString()} km → Latest: ${(summary.latest_odometer || 0).toLocaleString()} km`;
@@ -2906,16 +2908,22 @@ function renderMileageTab() {
     if (kpiMileage) kpiMileage.innerText = summary.average_mileage.toFixed(2);
 
     const kpiUnit = document.getElementById('mileageKpiUnit');
-    if (kpiUnit) kpiUnit.innerText = summary.mileage_unit;
+    if (kpiUnit) kpiUnit.innerText = (!tripVehicles || tripVehicles.length === 0) ? 'km/L' : summary.mileage_unit;
 
     const kpiBenchSub = document.getElementById('mileageKpiBenchmarkSub');
-    if (kpiBenchSub) kpiBenchSub.innerText = `Benchmark: ${summary.benchmark_mileage} ${summary.mileage_unit} (${summary.efficiency_percentage}% achieved)`;
+    if (kpiBenchSub) {
+      if (!tripVehicles || tripVehicles.length === 0) {
+        kpiBenchSub.innerText = 'No vehicle configured yet';
+      } else {
+        kpiBenchSub.innerText = `Benchmark: ${summary.benchmark_mileage} ${summary.mileage_unit} (${summary.efficiency_percentage}% achieved)`;
+      }
+    }
 
     const kpiFuelQty = document.getElementById('mileageKpiFuelQty');
     if (kpiFuelQty) kpiFuelQty.innerText = summary.total_fuel_quantity.toFixed(1);
 
     const kpiFuelUnit = document.getElementById('mileageKpiFuelUnit');
-    if (kpiFuelUnit) kpiFuelUnit.innerText = summary.quantity_unit;
+    if (kpiFuelUnit) kpiFuelUnit.innerText = (!tripVehicles || tripVehicles.length === 0) ? 'L' : summary.quantity_unit;
 
     const kpiFuelCostSub = document.getElementById('mileageKpiFuelCostSub');
     if (kpiFuelCostSub) kpiFuelCostSub.innerText = `Total Cost: ₹${summary.total_fuel_cost.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -2927,10 +2935,10 @@ function renderMileageTab() {
     if (kpiCostPerPersonSub) kpiCostPerPersonSub.innerText = `₹${summary.cost_per_person_km.toFixed(2)} / member-km (${members.length || 1} travelers)`;
 
     const kpiEfficiencyPct = document.getElementById('mileageKpiEfficiencyPct');
-    if (kpiEfficiencyPct) kpiEfficiencyPct.innerText = `${summary.efficiency_percentage}%`;
+    if (kpiEfficiencyPct) kpiEfficiencyPct.innerText = (!tripVehicles || tripVehicles.length === 0) ? '0%' : `${summary.efficiency_percentage}%`;
 
     const kpiRatingLabel = document.getElementById('mileageKpiRatingLabel');
-    if (kpiRatingLabel) kpiRatingLabel.innerText = summary.efficiency_label;
+    if (kpiRatingLabel) kpiRatingLabel.innerText = (!tripVehicles || tripVehicles.length === 0) ? 'No vehicle configured yet' : summary.efficiency_label;
   }
 
   // 4. Update Fuel Logs table

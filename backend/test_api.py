@@ -563,10 +563,20 @@ def test_settings_and_multi_vehicle_features():
     assert del_mode.status_code == 200
 
     # 7. Test Multi-Vehicle Management
-    # 7a. Get vehicles (initializes default Ertiga)
+    # 7a. Get vehicles (new trip starts with 0 vehicles)
     v_list = client.get(f"/api/trips/{trip_id}/vehicles").json()["vehicles"]
-    assert len(v_list) == 1
-    v1_id = v_list[0]["id"]
+    assert len(v_list) == 0
+
+    # Add first vehicle explicitly: Maruti Suzuki Ertiga (CNG)
+    add_v1 = client.post(f"/api/trips/{trip_id}/vehicles", json={
+        "vehicle_type": "Car",
+        "brand_model": "Maruti Suzuki Ertiga",
+        "fuel_type": "CNG",
+        "benchmark_mileage": 26.11,
+        "initial_odometer": 0.0
+    })
+    assert add_v1.status_code == 200
+    v1_id = add_v1.json()["id"]
 
     # 7b. Add second vehicle: Hyundai Creta (Petrol)
     add_v2 = client.post(f"/api/trips/{trip_id}/vehicles", json={

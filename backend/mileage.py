@@ -333,9 +333,10 @@ def update_trip_vehicle(trip_id: int, vehicle_id: int, vehicle_type: str, brand_
 
 
 def delete_trip_vehicle(trip_id: int, vehicle_id: int) -> bool:
-    """Delete a vehicle from this trip."""
+    """Delete a vehicle from this trip and associated fuel logs."""
     conn = get_db_connection()
     cursor = conn.cursor()
+    cursor.execute("DELETE FROM fuel_logs WHERE vehicle_id = ? AND trip_id = ?", (vehicle_id, trip_id))
     cursor.execute("DELETE FROM trip_vehicles WHERE id = ? AND trip_id = ?", (vehicle_id, trip_id))
     conn.commit()
     conn.close()
@@ -530,25 +531,17 @@ def calculate_trip_mileage_summary(trip_id: int, vehicle_id: Optional[int] = Non
     if not primary_summary and vehicles_summaries:
         primary_summary = vehicles_summaries[0]
 
-    # Default fallback vehicle if trip has no vehicle configured yet
+    # Default fallback summary if trip has no vehicle configured yet
     if not primary_summary:
-        default_v = {
-            "id": None,
-            "vehicle_type": "Car",
-            "brand_model": "Maruti Suzuki Ertiga",
-            "fuel_type": "CNG",
-            "benchmark_mileage": 26.11,
-            "initial_odometer": 0.0
-        }
         primary_summary = {
-            "vehicle": default_v,
+            "vehicle": None,
             "total_distance_km": 0.0,
             "total_fuel_quantity": 0.0,
-            "quantity_unit": "kg",
-            "mileage_unit": "km/kg",
+            "quantity_unit": "L",
+            "mileage_unit": "km/L",
             "total_fuel_cost": 0.0,
             "average_mileage": 0.0,
-            "benchmark_mileage": 26.11,
+            "benchmark_mileage": 0.0,
             "efficiency_percentage": 0.0,
             "efficiency_label": "No vehicle configured yet",
             "cost_per_km": 0.0,
