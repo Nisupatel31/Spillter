@@ -50,6 +50,7 @@ let currentFuelLogs = [];
 let currentMileageSummary = null;
 let tripVehicles = [];
 let selectedVehicleId = null;
+let editingFuelLogId = null;
 
 // Settings state
 let tripCategories = [];
@@ -2993,6 +2994,9 @@ function renderMileageTab() {
             <td class="px-3.5 py-3 whitespace-nowrap">${payerAvatar}</td>
             <td class="px-3.5 py-3 whitespace-nowrap">${splitBadge}</td>
             <td class="px-3.5 py-3 whitespace-nowrap text-right">
+              <button onclick="openEditFuelLogModal(${log.id})" class="text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 p-1.5 rounded-lg hover:bg-indigo-50 dark:hover:bg-slate-800 transition mr-1" title="Edit fuel stop">
+                <i data-lucide="edit-2" class="w-4 h-4"></i>
+              </button>
               <button onclick="deleteFuelLog(${log.id})" class="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950 transition" title="Delete fuel stop">
                 <i data-lucide="trash-2" class="w-4 h-4"></i>
               </button>
@@ -3306,6 +3310,15 @@ function openLogFuelModal() {
     return;
   }
 
+  editingFuelLogId = null;
+
+  const modalTitle = document.getElementById('logFuelModalTitle');
+  if (modalTitle) modalTitle.innerText = 'Log Fuel Stop';
+  const modalSub = document.getElementById('logFuelModalSubtitle');
+  if (modalSub) modalSub.innerText = 'Record fuel filled, odometer reading, and running cost';
+  const submitBtnText = document.getElementById('fuelSubmitBtnText');
+  if (submitBtnText) submitBtnText.innerText = 'Save Fuel Stop';
+
   // 1. Populate vehicle dropdown
   const vehSelect = document.getElementById('fuelVehicleSelect');
   if (vehSelect) {
@@ -3337,6 +3350,64 @@ function openLogFuelModal() {
   document.getElementById('fuelNotes').value = '';
   document.getElementById('fuelIsFullTank').checked = true;
   document.getElementById('fuelAddToExpenses').checked = true;
+
+  openModal('logFuelModal');
+  if (window.lucide) lucide.createIcons();
+}
+
+function openEditFuelLogModal(logId) {
+  if (!currentTripId) return;
+  const log = currentFuelLogs.find(l => l.id === logId);
+  if (!log) {
+    showToast('Fuel stop log not found', true);
+    return;
+  }
+
+  editingFuelLogId = logId;
+
+  const modalTitle = document.getElementById('logFuelModalTitle');
+  if (modalTitle) modalTitle.innerText = 'Edit Fuel Stop';
+  const modalSub = document.getElementById('logFuelModalSubtitle');
+  if (modalSub) modalSub.innerText = 'Update odometer reading, fuel quantity, or cost';
+  const submitBtnText = document.getElementById('fuelSubmitBtnText');
+  if (submitBtnText) submitBtnText.innerText = 'Update Fuel Stop';
+
+  // 1. Populate vehicle dropdown
+  const vehSelect = document.getElementById('fuelVehicleSelect');
+  if (vehSelect) {
+    vehSelect.innerHTML = tripVehicles.map(v => 
+      `<option value="${v.id}" ${(log.vehicle_id === v.id || (!log.vehicle_id && v.id === tripVehicles[0].id)) ? 'selected' : ''}>
+        ${v.vehicle_type === 'Bike' ? '🏍️' : '🚗'} ${escapeHtml(v.brand_model)} (${v.fuel_type})
+      </option>`
+    ).join('');
+    if (log.vehicle_id) {
+      vehSelect.value = String(log.vehicle_id);
+    }
+  }
+
+  // 2. Pre-fill date
+  document.getElementById('fuelDate').value = log.date || new Date().toISOString().split('T')[0];
+
+  // 3. Update dynamic unit labels and previous odometer
+  onFuelModalVehicleChange();
+
+  // 4. Populate payer dropdown
+  const payerSelect = document.getElementById('fuelPayer');
+  if (payerSelect) {
+    payerSelect.innerHTML = members.map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('');
+    if (log.payer_id) {
+      payerSelect.value = String(log.payer_id);
+    }
+  }
+
+  // 5. Fill inputs with existing values
+  document.getElementById('fuelOdometer').value = log.odometer_reading !== undefined && log.odometer_reading !== null ? log.odometer_reading : '';
+  document.getElementById('fuelQuantity').value = log.fuel_quantity !== undefined && log.fuel_quantity !== null ? log.fuel_quantity : '';
+  document.getElementById('fuelPrice').value = log.fuel_price_per_unit ? Number(log.fuel_price_per_unit).toFixed(2) : '';
+  document.getElementById('fuelAmount').value = log.fuel_amount !== undefined && log.fuel_amount !== null ? Number(log.fuel_amount).toFixed(2) : '';
+  document.getElementById('fuelNotes').value = log.notes || '';
+  document.getElementById('fuelIsFullTank').checked = !!log.is_full_tank;
+  document.getElementById('fuelAddToExpenses').checked = !!log.expense_id;
 
   openModal('logFuelModal');
   if (window.lucide) lucide.createIcons();
@@ -3402,7 +3473,8 @@ async function submitFuelLog(e) {
   const fuelPrice = parseFloat(document.getElementById('fuelPrice').value) || 0.0;
   const fuelAmount = parseFloat(document.getElementById('fuelAmount').value) || 0.0;
   const isFullTank = document.getElementById('fuelIsFullTank').checked;
-  const payerId = parseInt(document.getElementById('fuelPayer').value, 10);
+  const payerSelect = document.getElementById('fuelPayer');
+  const payerId = payerSelect && payerSelect.value ? parseInt(payerSelect.value, 10) : null;
   const addToExpenses = document.getElementById('fuelAddToExpenses').checked;
   const notes = document.getElementById('fuelNotes').value.trim();
 
@@ -3428,9 +3500,15 @@ async function submitFuelLog(e) {
     notes: notes || 'Fuel stop refilling'
   };
 
+  const isEditing = editingFuelLogId !== null;
+  const url = isEditing
+    ? `/api/trips/${currentTripId}/fuel-logs/${editingFuelLogId}`
+    : `/api/trips/${currentTripId}/fuel-logs`;
+  const method = isEditing ? 'PUT' : 'POST';
+
   try {
-    const res = await authFetch(`/api/trips/${currentTripId}/fuel-logs`, {
-      method: 'POST',
+    const res = await authFetch(url, {
+      method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
@@ -3438,21 +3516,23 @@ async function submitFuelLog(e) {
     if (res.ok) {
       const activeVeh = tripVehicles.find(v => v.id === vehicleId);
       const isCng = activeVeh && activeVeh.fuel_type === 'CNG';
-      showToast(`Fuel stop logged: ${fuelQuantity} ${isCng ? 'kg' : 'L'} (₹${fuelAmount}) ⛽`);
+      const unit = isCng ? 'kg' : 'L';
+      showToast(isEditing ? `Fuel stop updated: ${fuelQuantity} ${unit} (₹${fuelAmount}) ⛽` : `Fuel stop logged: ${fuelQuantity} ${unit} (₹${fuelAmount}) ⛽`);
       closeModal('logFuelModal');
+      editingFuelLogId = null;
 
-      if (addToExpenses) {
+      if (addToExpenses || isEditing) {
         await loadTripData(currentTripId);
       } else {
         await loadMileageData(currentTripId);
       }
     } else {
       const errData = await res.json();
-      showToast(errData.detail || 'Failed to save fuel stop', true);
+      showToast(errData.detail || (isEditing ? 'Failed to update fuel stop' : 'Failed to save fuel stop'), true);
     }
   } catch (err) {
     console.error(err);
-    showToast('Error saving fuel stop', true);
+    showToast(isEditing ? 'Error updating fuel stop' : 'Error saving fuel stop', true);
   }
 }
 

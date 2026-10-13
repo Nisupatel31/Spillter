@@ -618,14 +618,37 @@ def test_settings_and_multi_vehicle_features():
         "payer_id": m1
     })
     assert f_v2.status_code == 200
+    f_log_id = f_v2.json()["id"]
 
-    # 7f. Check mileage summary contains fleet + per-vehicle data
+    # 7f. Test updating fuel log
+    f_update = client.put(f"/api/trips/{trip_id}/fuel-logs/{f_log_id}", json={
+        "date": "2026-09-04",
+        "vehicle_id": v2_id,
+        "odometer_reading": 25350.0,
+        "distance_run": 350.0,
+        "fuel_amount": 2500.0,
+        "fuel_quantity": 25.0,
+        "fuel_price_per_unit": 100.0,
+        "is_full_tank": True,
+        "payer_id": m1,
+        "notes": "Updated fill-up at HP Pump"
+    })
+    assert f_update.status_code == 200
+
+    logs_res = client.get(f"/api/trips/{trip_id}/fuel-logs").json()["logs"]
+    updated_log = next(l for l in logs_res if l["id"] == f_log_id)
+    assert updated_log["fuel_amount"] == 2500.0
+    assert updated_log["fuel_quantity"] == 25.0
+    assert updated_log["odometer_reading"] == 25350.0
+    assert updated_log["notes"] == "Updated fill-up at HP Pump"
+
+    # 7g. Check mileage summary contains fleet + per-vehicle data with updated amount
     sum_res = client.get(f"/api/trips/{trip_id}/mileage-summary").json()
     assert sum_res["vehicles_count"] == 3
     assert len(sum_res["vehicles"]) == 3
-    assert sum_res["total_fuel_cost"] == 2000.0
+    assert sum_res["total_fuel_cost"] == 2500.0
 
-    # 7g. Delete third vehicle
+    # 7h. Delete third vehicle
     del_v3 = client.delete(f"/api/trips/{trip_id}/vehicles/{v3_id}")
     assert del_v3.status_code == 200
     remaining_v = client.get(f"/api/trips/{trip_id}/vehicles").json()["vehicles"]

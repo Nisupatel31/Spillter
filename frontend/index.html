@@ -1865,8 +1865,8 @@
             ⛽
           </div>
           <div>
-            <h3 class="text-lg font-bold text-slate-900">Log Fuel Stop</h3>
-            <p class="text-xs text-slate-500">Record fuel filled, odometer reading, and running cost</p>
+            <h3 id="logFuelModalTitle" class="text-lg font-bold text-slate-900">Log Fuel Stop</h3>
+            <p id="logFuelModalSubtitle" class="text-xs text-slate-500">Record fuel filled, odometer reading, and running cost</p>
           </div>
         </div>
         <button onclick="closeModal('logFuelModal')" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
@@ -1962,9 +1962,9 @@
           <button type="button" onclick="closeModal('logFuelModal')" class="px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50">
             Cancel
           </button>
-          <button type="submit" class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/30 transition transform active:scale-95 flex items-center space-x-1.5">
+          <button type="submit" id="fuelSubmitBtn" class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/30 transition transform active:scale-95 flex items-center space-x-1.5">
             <i data-lucide="check-circle" class="w-4 h-4"></i>
-            <span>Save Fuel Stop</span>
+            <span id="fuelSubmitBtnText">Save Fuel Stop</span>
           </button>
         </div>
       </form>
@@ -1977,6 +1977,6 @@
     <span id="toastMsg">Notification message</span>
   </div>
 
-  <script src="/static/app.js?v=20260930_v1"></script>
+  <script src="/static/app.js?v=20261013_v2"></script>
 </body>
 </html>

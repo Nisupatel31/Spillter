@@ -1093,8 +1093,10 @@ def api_update_fuel_log(trip_id: int, log_id: int, payload: FuelLogCreate):
     v_id = v_row["id"] if v_row else None
     v_fuel = v_row["fuel_type"] if v_row else (payload.fuel_type or "Petrol")
     v_model = v_row["brand_model"] if v_row else ""
+    now = datetime.now().isoformat()
+    expense_id = log["expense_id"]
 
-    if log["expense_id"] and payload.add_to_expenses and payload.payer_id:
+    if expense_id and payload.add_to_expenses and payload.payer_id:
         unit = "kg" if v_fuel == "CNG" else "L"
         prefix = f"{v_model} - " if v_model else ""
         exp_title = f"{prefix}Fuel ({v_fuel}) - {payload.fuel_quantity} {unit}"
@@ -1102,30 +1104,81 @@ def api_update_fuel_log(trip_id: int, log_id: int, payload: FuelLogCreate):
             UPDATE expenses
             SET title = ?, amount = ?, date = ?, payer_id = ?, split_type = ?, notes = ?
             WHERE id = ?
-        """, (exp_title, payload.fuel_amount, payload.date, payload.payer_id, payload.split_type or "equal", payload.notes or "Auto-synced from Fuel Fill-Up", log["expense_id"]))
+        """, (exp_title, payload.fuel_amount, payload.date, payload.payer_id, payload.split_type or "equal", payload.notes or "Auto-synced from Fuel Fill-Up", expense_id))
 
         if payload.splits and len(payload.splits) > 0:
-            cursor.execute("DELETE FROM expense_splits WHERE expense_id = ?", (log["expense_id"],))
+            cursor.execute("DELETE FROM expense_splits WHERE expense_id = ?", (expense_id,))
             for s in payload.splits:
                 cursor.execute("""
                     INSERT INTO expense_splits (expense_id, member_id, share_amount, percentage)
                     VALUES (?, ?, ?, ?)
-                """, (log["expense_id"], s.member_id, s.share_amount, s.percentage))
+                """, (expense_id, s.member_id, s.share_amount, s.percentage))
+        else:
+            members = cursor.execute("SELECT id FROM members WHERE trip_id = ?", (trip_id,)).fetchall()
+            if members:
+                cursor.execute("DELETE FROM expense_splits WHERE expense_id = ?", (expense_id,))
+                count = len(members)
+                per_share = round(payload.fuel_amount / count, 2)
+                allocated = 0.0
+                for idx, m in enumerate(members):
+                    share = per_share if idx < count - 1 else round(payload.fuel_amount - allocated, 2)
+                    allocated += share
+                    cursor.execute("""
+                    INSERT INTO expense_splits (expense_id, member_id, share_amount, percentage)
+                    VALUES (?, ?, ?, ?)
+                    """, (expense_id, m["id"], share, round(100.0 / count, 2)))
+
+    elif not expense_id and payload.add_to_expenses and payload.payer_id:
+        unit = "kg" if v_fuel == "CNG" else "L"
+        prefix = f"{v_model} - " if v_model else ""
+        exp_title = f"{prefix}Fuel ({v_fuel}) - {payload.fuel_quantity} {unit}"
+        cursor.execute("""
+        INSERT INTO expenses (trip_id, title, amount, date, category, payer_id, split_type, payment_mode, notes, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (trip_id, exp_title, payload.fuel_amount, payload.date, "Travel", payload.payer_id,
+              payload.split_type or "equal", "UPI", payload.notes or "Auto-synced from Fuel Fill-Up", now))
+        expense_id = cursor.lastrowid
+
+        if payload.splits and len(payload.splits) > 0:
+            for s in payload.splits:
+                cursor.execute("""
+                INSERT INTO expense_splits (expense_id, member_id, share_amount, percentage)
+                VALUES (?, ?, ?, ?)
+                """, (expense_id, s.member_id, s.share_amount, s.percentage))
+        else:
+            members = cursor.execute("SELECT id FROM members WHERE trip_id = ?", (trip_id,)).fetchall()
+            if members:
+                count = len(members)
+                per_share = round(payload.fuel_amount / count, 2)
+                allocated = 0.0
+                for idx, m in enumerate(members):
+                    share = per_share if idx < count - 1 else round(payload.fuel_amount - allocated, 2)
+                    allocated += share
+                    cursor.execute("""
+                    INSERT INTO expense_splits (expense_id, member_id, share_amount, percentage)
+                    VALUES (?, ?, ?, ?)
+                    """, (expense_id, m["id"], share, round(100.0 / count, 2)))
+
+    elif expense_id and not payload.add_to_expenses:
+        cursor.execute("DELETE FROM expense_splits WHERE expense_id = ?", (expense_id,))
+        cursor.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
+        expense_id = None
 
     cursor.execute("""
         UPDATE fuel_logs
         SET vehicle_id = ?, date = ?, odometer_reading = ?, distance_run = ?, fuel_amount = ?,
-            fuel_quantity = ?, fuel_price_per_unit = ?, is_full_tank = ?, payer_id = ?, notes = ?
+            fuel_quantity = ?, fuel_price_per_unit = ?, is_full_tank = ?, fuel_type = ?,
+            payer_id = ?, expense_id = ?, notes = ?
         WHERE id = ? AND trip_id = ?
     """, (
         v_id, payload.date, payload.odometer_reading, payload.distance_run or 0.0,
         payload.fuel_amount, payload.fuel_quantity, payload.fuel_price_per_unit,
-        1 if payload.is_full_tank else 0, payload.payer_id, payload.notes or "",
+        1 if payload.is_full_tank else 0, v_fuel, payload.payer_id, expense_id, payload.notes or "",
         log_id, trip_id
     ))
     conn.commit()
     conn.close()
-    return {"id": log_id, "message": "Fuel log updated successfully"}
+    return {"id": log_id, "expense_id": expense_id, "message": "Fuel log updated successfully"}
 
 
 @app.delete("/api/trips/{trip_id}/fuel-logs/{log_id}")
