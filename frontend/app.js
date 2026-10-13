@@ -69,8 +69,26 @@ const CATEGORY_META = {
   Activities: { icon: 'waves', label: 'Activities', color: '#06B6D4' },
   Sightseeing: { icon: 'camera', label: 'Sightseeing', color: '#8B5CF6' },
   Shopping: { icon: 'shopping-bag', label: 'Shopping', color: '#10B981' },
-  Misc: { icon: 'box', label: 'Misc', color: '#64748B' }
+  Misc: { icon: 'box', label: 'Misc', color: '#64748B' },
+  'Stay & Accommodation': { icon: 'hotel', label: 'Stay & Accommodation', color: '#6366F1' },
+  'Food & Dining': { icon: 'utensils', label: 'Food & Dining', color: '#EC4899' },
+  'Travel & Transport': { icon: 'car', label: 'Travel & Transport', color: '#F59E0B' },
+  'Activities & Adventure': { icon: 'waves', label: 'Activities & Adventure', color: '#06B6D4' },
+  'Sightseeing & Tickets': { icon: 'camera', label: 'Sightseeing & Tickets', color: '#8B5CF6' },
+  'Shopping & Souvenirs': { icon: 'shopping-bag', label: 'Shopping & Souvenirs', color: '#10B981' },
+  'Miscellaneous': { icon: 'box', label: 'Miscellaneous', color: '#64748B' }
 };
+
+// HTML escaping helper to prevent XSS and template injection
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 // Numeric input sanitization (prevents non-numeric characters and ensures clean decimal format)
 function validateDecimalInput(el) {
@@ -816,7 +834,20 @@ function renderRecentExpensesTable(recentList) {
   const tbody = document.getElementById('recentExpensesTableBody');
   tbody.innerHTML = '';
   if (!recentList || recentList.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" class="px-5 py-6 text-center text-slate-400">No expenses recorded yet. Click "+ Add Expense" to start!</td></tr>`;
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="7" class="px-5 py-8 text-center">
+          <div class="flex flex-col items-center justify-center space-y-2">
+            <span class="text-xs text-slate-400 font-medium">No expenses recorded for this trip yet</span>
+            <button type="button" onclick="openAddExpenseModal()" class="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer">
+              <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
+              <span>+ Add First Expense</span>
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+    lucide.createIcons();
     return;
   }
 
@@ -868,12 +899,16 @@ function filterExpenses() {
 
   if (filtered.length === 0) {
     container.innerHTML = `
-      <div class="bg-white rounded-2xl p-10 text-center border border-slate-200">
-        <div class="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
+      <div class="bg-white dark:bg-slate-900 rounded-2xl p-10 text-center border border-slate-200 dark:border-slate-800">
+        <div class="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto mb-3">
           <i data-lucide="receipt" class="w-6 h-6"></i>
         </div>
-        <h4 class="text-base font-bold text-slate-700">No expenses found</h4>
-        <p class="text-xs text-slate-400 mt-1">Try changing filters or add a new travel expense</p>
+        <h4 class="text-base font-bold text-slate-700 dark:text-slate-200">No expenses recorded</h4>
+        <p class="text-xs text-slate-400 mt-1 mb-4">Start logging bills, food, tickets or shared travel costs</p>
+        <button type="button" onclick="openAddExpenseModal()" class="inline-flex items-center space-x-2 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-brand-600/30 transition transform active:scale-95 cursor-pointer">
+          <i data-lucide="plus-circle" class="w-4 h-4"></i>
+          <span>+ Log Travel Expense</span>
+        </button>
       </div>
     `;
     lucide.createIcons();
@@ -1259,14 +1294,36 @@ function renderMembersTab() {
 
   // Also populate payer dropdown filter
   const filterPayer = document.getElementById('memberFilter');
-  filterPayer.innerHTML = '<option value="all">All Payers</option>';
+  if (filterPayer) {
+    filterPayer.innerHTML = '<option value="all">All Payers</option>';
+  }
+
+  if (members.length === 0) {
+    grid.innerHTML = `
+      <div class="col-span-full bg-white dark:bg-slate-900 rounded-2xl p-8 sm:p-10 text-center border border-slate-200 dark:border-slate-800 shadow-xs">
+        <div class="w-14 h-14 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto mb-3 shadow-inner">
+          <i data-lucide="users" class="w-7 h-7"></i>
+        </div>
+        <h3 class="text-base font-bold text-slate-800 dark:text-white">No Travelers Added Yet</h3>
+        <p class="text-xs text-slate-400 dark:text-slate-400 mt-1 max-w-sm mx-auto">Add your friends or group members to this trip to start splitting bills and tracking expenses.</p>
+        <button type="button" onclick="openAddMemberModal()" class="mt-4 inline-flex items-center space-x-2 px-5 py-2.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-brand-600/30 transition transform active:scale-95 cursor-pointer">
+          <i data-lucide="user-plus" class="w-4 h-4"></i>
+          <span>+ Add First Traveler</span>
+        </button>
+      </div>
+    `;
+    lucide.createIcons();
+    return;
+  }
 
   members.forEach(m => {
     // Add to filter dropdown
-    const opt = document.createElement('option');
-    opt.value = m.id;
-    opt.innerText = m.name;
-    filterPayer.appendChild(opt);
+    if (filterPayer) {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.innerText = m.name;
+      filterPayer.appendChild(opt);
+    }
 
     // Render member card
     const card = document.createElement('div');
@@ -1308,6 +1365,32 @@ function renderMembersTab() {
     `;
     grid.appendChild(card);
   });
+
+  // Append quick action card to log expense once travelers are in place
+  const actionBanner = document.createElement('div');
+  actionBanner.className = 'col-span-full bg-gradient-to-r from-brand-50 via-indigo-50 to-emerald-50 dark:from-slate-800 dark:via-slate-800 dark:to-slate-800/90 rounded-2xl p-5 border border-brand-200/80 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shadow-xs mt-1';
+  actionBanner.innerHTML = `
+    <div class="flex items-center space-x-3.5">
+      <div class="w-11 h-11 rounded-2xl bg-brand-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-brand-600/30">
+        <i data-lucide="receipt" class="w-5 h-5"></i>
+      </div>
+      <div>
+        <h4 class="text-sm font-bold text-slate-900 dark:text-white">${members.length} Traveler${members.length > 1 ? 's' : ''} Ready in Group</h4>
+        <p class="text-xs text-slate-500 dark:text-slate-400">Ready to record a bill or split hotel, food &amp; fuel costs?</p>
+      </div>
+    </div>
+    <div class="flex items-center space-x-2.5 shrink-0">
+      <button type="button" onclick="openAddMemberModal()" class="inline-flex items-center space-x-1.5 px-3.5 py-2.5 bg-white dark:bg-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs sm:text-sm font-bold border border-slate-200 dark:border-slate-600 transition shadow-2xs cursor-pointer">
+        <i data-lucide="user-plus" class="w-4 h-4"></i>
+        <span>+ Add Another</span>
+      </button>
+      <button type="button" onclick="openAddExpenseModal()" class="inline-flex items-center space-x-2 px-4 py-2.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-brand-600/30 transition transform active:scale-95 cursor-pointer">
+        <i data-lucide="plus-circle" class="w-4 h-4"></i>
+        <span>+ Log Travel Expense</span>
+      </button>
+    </div>
+  `;
+  grid.appendChild(actionBanner);
 
   // Populate individual spent and share from dashboard
   if (currentTripId) {
@@ -1437,6 +1520,7 @@ function editExpenseItem(expenseId) {
 function populatePayerDropdown() {
   const payerSelect = document.getElementById('expPayer');
   if (!payerSelect) return;
+  const currentVal = payerSelect.value;
   payerSelect.innerHTML = '';
 
   members.forEach(m => {
@@ -1445,6 +1529,12 @@ function populatePayerDropdown() {
     opt.innerText = m.name;
     payerSelect.appendChild(opt);
   });
+
+  if (currentVal && members.some(m => m.id == currentVal)) {
+    payerSelect.value = currentVal;
+  } else if (members.length > 0) {
+    payerSelect.value = members[0].id;
+  }
 }
 
 function setSplitType(type) {
@@ -1623,10 +1713,29 @@ async function submitExpense(event) {
     return;
   }
 
+  const tripIdToUse = currentTripId || parseInt(document.getElementById('tripSelect')?.value);
+  if (!tripIdToUse) {
+    showToast('Please select or create a trip first', true);
+    return;
+  }
+
   const title = document.getElementById('expTitle').value.trim();
-  const date = document.getElementById('expDate').value;
-  const category = document.getElementById('expCategory').value;
-  const payerId = parseInt(document.getElementById('expPayer').value);
+  const date = document.getElementById('expDate').value || new Date().toISOString().split('T')[0];
+  const expCat = document.getElementById('expCategory');
+  const category = (expCat && expCat.value) ? expCat.value : 'Food & Dining';
+
+  const payerSelect = document.getElementById('expPayer');
+  let payerId = parseInt(payerSelect ? payerSelect.value : '');
+  if (!payerId || isNaN(payerId)) {
+    if (members.length > 0) {
+      payerId = members[0].id;
+      if (payerSelect) payerSelect.value = payerId;
+    } else {
+      showToast('Please add travelers to this trip before logging expenses', true);
+      return;
+    }
+  }
+
   const notes = document.getElementById('expNotes').value.trim();
 
   let splits = [];
@@ -1724,7 +1833,8 @@ async function submitExpense(event) {
     }
   }
 
-  const paymentMode = document.getElementById('expPaymentMode') ? document.getElementById('expPaymentMode').value : 'UPI';
+  const expMode = document.getElementById('expPaymentMode');
+  const paymentMode = (expMode && expMode.value) ? expMode.value : 'UPI / QR';
 
   const payload = {
     title,
@@ -1739,7 +1849,7 @@ async function submitExpense(event) {
   };
 
   const isEditing = Boolean(editingExpenseId);
-  const url = isEditing ? `/api/expenses/${editingExpenseId}` : `/api/trips/${currentTripId}/expenses`;
+  const url = isEditing ? `/api/expenses/${editingExpenseId}` : `/api/trips/${tripIdToUse}/expenses`;
   const method = isEditing ? 'PUT' : 'POST';
 
   try {
@@ -1753,10 +1863,20 @@ async function submitExpense(event) {
       showToast(isEditing ? 'Expense updated successfully! ✏️' : 'Expense logged successfully! 💰');
       editingExpenseId = null;
       closeModal('addExpenseModal');
-      await loadTripData(currentTripId);
+      await loadTripData(tripIdToUse);
     } else {
-      const errData = await res.json();
-      showToast(errData.detail || 'Failed to save expense', true);
+      let errMsg = 'Failed to save expense';
+      try {
+        const errData = await res.json();
+        if (typeof errData.detail === 'string') {
+          errMsg = errData.detail;
+        } else if (Array.isArray(errData.detail)) {
+          errMsg = errData.detail.map(d => d.msg || JSON.stringify(d)).join(', ');
+        } else if (errData.detail) {
+          errMsg = JSON.stringify(errData.detail);
+        }
+      } catch (e) {}
+      showToast(errMsg, true);
     }
   } catch (err) {
     console.error(err);
@@ -2215,6 +2335,7 @@ function toggleRawOcrText() {
 function populateScanPayerDropdown() {
   const select = document.getElementById('scanPayer');
   if (!select) return;
+  const currentVal = select.value;
   select.innerHTML = '';
   members.forEach(m => {
     const opt = document.createElement('option');
@@ -2222,6 +2343,11 @@ function populateScanPayerDropdown() {
     opt.innerText = m.name;
     select.appendChild(opt);
   });
+  if (currentVal && members.some(m => m.id == currentVal)) {
+    select.value = currentVal;
+  } else if (members.length > 0) {
+    select.value = members[0].id;
+  }
 }
 
 function setScanSplitType(type) {
@@ -2425,6 +2551,12 @@ async function submitScannedExpense(event) {
     }
   }
 
+  const tripIdToUse = currentTripId || parseInt(document.getElementById('tripSelect')?.value);
+  if (!tripIdToUse) {
+    showToast('Please select or create a trip first', true);
+    return;
+  }
+
   const payload = {
     title,
     amount: totalAmount,
@@ -2438,7 +2570,7 @@ async function submitScannedExpense(event) {
   };
 
   try {
-    const res = await authFetch(`/api/trips/${currentTripId}/expenses`, {
+    const res = await authFetch(`/api/trips/${tripIdToUse}/expenses`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -2447,10 +2579,20 @@ async function submitScannedExpense(event) {
     if (res.ok) {
       showToast(`Scanned bill "${title}" logged & split successfully! 🎉`);
       closeModal('scanBillModal');
-      await loadTripData(currentTripId);
+      await loadTripData(tripIdToUse);
     } else {
-      const errData = await res.json();
-      showToast(errData.detail || 'Failed to save scanned expense', true);
+      let errMsg = 'Failed to save scanned expense';
+      try {
+        const errData = await res.json();
+        if (typeof errData.detail === 'string') {
+          errMsg = errData.detail;
+        } else if (Array.isArray(errData.detail)) {
+          errMsg = errData.detail.map(d => d.msg || JSON.stringify(d)).join(', ');
+        } else if (errData.detail) {
+          errMsg = JSON.stringify(errData.detail);
+        }
+      } catch (e) {}
+      showToast(errMsg, true);
     }
   } catch (err) {
     console.error(err);
@@ -3353,13 +3495,13 @@ function populateCategoryDropdown() {
   const scanCat = document.getElementById('scanCategory');
 
   const defaultCats = [
-    { name: 'Food', icon: '🍽️' },
-    { name: 'Stay', icon: '🏨' },
-    { name: 'Travel', icon: '🚗' },
-    { name: 'Activities', icon: '🏄' },
-    { name: 'Sightseeing', icon: '📸' },
-    { name: 'Shopping', icon: '🛍️' },
-    { name: 'Misc', icon: '📦' }
+    { name: 'Food & Dining', icon: '🍽️' },
+    { name: 'Stay & Accommodation', icon: '🏨' },
+    { name: 'Travel & Transport', icon: '🚗' },
+    { name: 'Activities & Adventure', icon: '🏄' },
+    { name: 'Sightseeing & Tickets', icon: '📸' },
+    { name: 'Shopping & Souvenirs', icon: '🛍️' },
+    { name: 'Miscellaneous', icon: '📦' }
   ];
 
   const catsToUse = (tripCategories && tripCategories.length > 0) ? tripCategories : defaultCats;
@@ -3371,6 +3513,8 @@ function populateCategoryDropdown() {
     ).join('');
     if (currentVal && catsToUse.some(c => c.name === currentVal)) {
       expCat.value = currentVal;
+    } else if (catsToUse.length > 0) {
+      expCat.value = catsToUse[0].name;
     }
   }
 
@@ -3381,6 +3525,8 @@ function populateCategoryDropdown() {
     ).join('');
     if (currentVal && catsToUse.some(c => c.name === currentVal)) {
       scanCat.value = currentVal;
+    } else if (catsToUse.length > 0) {
+      scanCat.value = catsToUse[0].name;
     }
   }
 
@@ -3496,7 +3642,7 @@ async function loadTripPaymentModes(tripId = currentTripId) {
 function populatePaymentModeDropdown() {
   const expMode = document.getElementById('expPaymentMode');
   const defaultModes = [
-    { name: 'UPI', icon: '📱' },
+    { name: 'UPI / QR', icon: '📱' },
     { name: 'Cash', icon: '💵' },
     { name: 'Credit Card', icon: '💳' },
     { name: 'Debit Card', icon: '💳' },
@@ -3512,6 +3658,8 @@ function populatePaymentModeDropdown() {
     ).join('');
     if (currentVal && modesToUse.some(m => m.name === currentVal)) {
       expMode.value = currentVal;
+    } else if (modesToUse.length > 0) {
+      expMode.value = modesToUse[0].name;
     }
   }
 }
